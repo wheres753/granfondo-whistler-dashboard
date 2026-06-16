@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GranFondo Training Dashboard — Sam</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1117; --card:#1a1d27; --border:#2a2d3a;
+    --accent:#3b82f6; --success:#22c55e; --warning:#f59e0b; --danger:#ef4444;
+    --text:#f1f5f9; --text2:#94a3b8;
+    --z1:#94a3b8; --z2:#3b82f6; --z3:#f59e0b; --z4:#f97316; --z5:#ef4444;
+  }
+  html,body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif;margin:0;}
+  *{scrollbar-width:thin;scrollbar-color:#2a2d3a #0f1117;}
+  ::-webkit-scrollbar{height:8px;width:8px;}
+  ::-webkit-scrollbar-thumb{background:#2a2d3a;border-radius:8px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:0.85rem;box-shadow:0 1px 3px rgba(0,0,0,.3);}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  .btn{border-radius:0.55rem;font-weight:600;transition:all .15s;}
+  .btn-primary{background:var(--accent);color:white;}
+  .btn-primary:hover{background:#2563eb;}
+  .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-outline:hover{border-color:var(--accent);color:var(--accent);}
+  .tab-active{color:var(--text);border-bottom:2px solid var(--accent);}
+  input,select,textarea{background:#0f1117;border:1px solid var(--border);color:var(--text);border-radius:0.5rem;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  input[type=range]{accent-color:var(--accent);}
+  .fade-in{animation:fade .25s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  .modal-in{animation:slideup .25s ease;}
+  @keyframes slideup{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:none;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+const RC = window.Recharts || {};
+const { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer, ReferenceLine, AreaChart, Area } = RC;
+
+/* ============================== CONSTANTS ============================== */
+const ATHLETE = {
+  name: "Sam", age: 26, weightKg: 85, maxHR: 194,
+  raceDate: "2026-09-12", trainStartDate: "2026-06-15",
+  targetTimeMinutes: 240, raceDistanceKm: 122, raceElevationM: 2300,
+};
+const WEEK1_MONDAY = "2026-06-15";
+
+const ZONE_COLORS = { z1:"#94a3b8", z2:"#3b82f6", z3:"#f59e0b", z4:"#f97316", z5:"#ef4444" };
+const ZONE_NAMES = { z1:"Recovery", z2:"Endurance", z3:"Tempo (avoid)", z4:"Threshold", z5:"VO2 Max" };
+const ZONE_FEEL = {
+  z1:"Could sing", z2:"Full sentences, working", z3:"Short sentences",
+  z4:"Few words max", z5:"Can't speak"
+};
+// fractions of maxHR that reproduce the spec table at maxHR=194
+const ZONE_FRAC = { z1:0.597, z2:0.701, z3:0.799, z4:0.897 };
+function zoneBounds(maxHR){
+  const z1Max=Math.round(ZONE_FRAC.z1*maxHR), z2Max=Math.round(ZONE_FRAC.z2*maxHR),
+        z3Max=Math.round(ZONE_FRAC.z3*maxHR), z4Max=Math.round(ZONE_FRAC.z4*maxHR);
+  return {
+    z1:{lo:0,hi:z1Max}, z2:{lo:z1Max+1,hi:z2Max}, z3:{lo:z2Max+1,hi:z3Max},
+    z4:{lo:z3Max+1,hi:z4Max}, z5:{lo:z4Max+1,hi:260}
+  };
+}
+function zoneRangeLabel(zone,maxHR){
+  const b=zoneBounds(maxHR)[zone];
+  if(zone==="z1") return "<"+(b.hi+1);
+  if(zone==="z5") return (b.lo)+"+";
+  return b.lo+"–"+b.hi;
+}
+function zoneForHR(hr,maxHR){
+  const b=zoneBounds(maxHR);
+  for(const z of ["z1","z2","z3","z4","z5"]) if(hr>=b[z].lo && hr<=b[z].hi) return z;
+  return "z2";
+}
+
+const coachNotes = {
+  1:"Week 1 is about showing up, not suffering. Your job is to learn what Zone 2 feels like — you should be able to hold a full conversation. If you can't, you're going too hard.",
+  2:"Two weeks in. Your body is adjusting to the new routine. The gym will feel awkward — that's normal. Focus on form over load. MTB ride this week: stay disciplined on the HR.",
+  3:"First threshold intervals this week on the spin bike. They will feel hard. That's the point. The 10 minutes will pass. Don't go out too hot — pace the first interval conservatively.",
+  4:"You should be settling into a rhythm now. How's your gym form? The goblet squat and RDL should be starting to feel natural. Add a little weight if you've nailed the movement.",
+  5:"Last week of Phase 1. Your 3.5-hour MTB this Saturday is the longest sustained effort yet. Pack food and actually eat it every 45 minutes — you're training your gut as much as your legs.",
+  6:"Welcome to Phase 2. 2×20 minute threshold efforts. This is the most effective cycling workout in existence. Pace the first 20 minutes — don't blow up, or the second 20 will be a disaster.",
+  7:"You've added a second spin session on Fridays. Keep it easy — it's about cadence and aerobic volume, not more suffering. Your MTB this week has structured climb efforts: treat them like the spin intervals.",
+  8:"Mid-point of the build. You should be noticeably stronger than week 1. If your average HR is lower for the same efforts, that's your aerobic system adapting. That's the goal.",
+  9:"Big week. Five-hour MTB Saturday is your peak volume day of the entire block. Fuel early, pace conservatively for the first two hours, and finish strong. This is your race simulation.",
+  10:"Recovery week disguised as training. Volume drops slightly. Let the adaptations from week 9 settle. Your body gets stronger during rest, not during effort.",
+  11:"Last heavy week. Enjoy it. After Sunday you're in taper mode. Hit your 4-hour MTB hard. Last big gym session — this is your final strength stimulus before race day.",
+  12:"Volume drops 40%. You may feel sluggish — this is normal during taper. Your legs are loading up glycogen and repairing. Trust the process. Resist the urge to add extra sessions.",
+  13:"Race week. Everything you needed to do is done. Short easy efforts only. Sleep more than usual. Eat more carbs than usual. Visualize the course. You're ready.",
+};
+
+/* --------- gym programs --------- */
+const GYM_P1 = [
+  {name:"Goblet Squat",sets:3,reps:"12",notes:"Feet shoulder-width, chest up, squat to parallel."},
+  {name:"Romanian Deadlift",sets:3,reps:"10",notes:"Hinge at hips, soft knee bend, flat back the whole way. Feel the hamstrings."},
+  {name:"Bulgarian Split Squat",sets:3,reps:"8 each leg",notes:"Rear foot on bench. Stay tall. Front knee tracks over toes."},
+  {name:"Plank",sets:3,reps:"45 sec",notes:"Squeeze glutes and abs. Don't let hips sag or pike. Build toward 90 sec by wk 5."},
+  {name:"Glute Bridge",sets:3,reps:"15",notes:"Drive through heels. Squeeze at the top for 1 second."},
+  {name:"Dead Bug",sets:3,reps:"10 each side",notes:"Slow and controlled. Lower back pressed to floor the whole time."},
+];
+const GYM_P2 = [
+  {name:"Barbell Back Squat",sets:4,reps:"6",notes:"Start at bodyweight/empty bar, add 5–10 kg each session you nail it."},
+  {name:"Romanian Deadlift",sets:4,reps:"6",notes:"Heavier than phase 1, same impeccable form."},
+  {name:"Walking Lunges",sets:3,reps:"10 each leg",notes:"Add dumbbells from wk 7."},
+  {name:"Single-Leg Press / Step-Up",sets:3,reps:"8–10 each leg",notes:"Single-leg press if machine available, else step-up onto bench."},
+  {name:"Plank Variations",sets:3,reps:"60–90 sec",notes:"Side plank, RKC plank, standard."},
+  {name:"Pallof Press",sets:3,reps:"10 each side",notes:"Cable or band. Anti-rotation core."},
+];
+const GYM_TAPER = GYM_P2.slice(0,4).map(e=>({...e,sets:3,reps:"8",notes:"Lighter weight — maintenance only, not a stimulus. "+e.notes}));
+const gymWeightNote = {
+  1:"Bodyweight only. Learn the movements. No ego.",
+  2:"Add light dumbbells to the goblet squat if form is solid.",
+  3:"Keep building plank to 60 sec. Add light load on RDL.",
+  4:"Add dumbbells to Bulgarian split squats. Progress only with perfect form.",
+  5:"Phase 1 peak. Plank to 3×90 sec. Movements should feel natural now.",
+  6:"Switch to barbell back squat. Start light, add 5–10 kg when you nail all reps.",
+  7:"Add dumbbells to walking lunges. Keep adding squat load progressively.",
+  8:"You should be noticeably stronger. Power-to-weight is the goal, not mass.",
+  9:"Maintain load — big MTB volume this week, don't dig a recovery hole in the gym.",
+  10:"Recovery week — keep weights moderate, prioritise feeling fresh.",
+  11:"Last heavy session of the block. Final strength stimulus before taper.",
+  12:"Taper: one lighter session only (Monday). 3×8, no grinding.",
+};
+
+/* --------- spin sessions: arrays of {zone,durationMin,instruction} --------- */
+const SPIN = {
+  1:["Spin Bike — Z2 Aerobic Base",60,[
+    {zone:"z1",durationMin:5,instruction:"Easy warm-up, 75 RPM."},
+    {zone:"z2",durationMin:50,instruction:"Steady endurance, 85–90 RPM. Full sentences. If you can't talk, slow down."},
+    {zone:"z1",durationMin:5,instruction:"Cool down, easy spin."}]],
+  2:["Spin Bike — Z2 Aerobic Base",60,[
+    {zone:"z1",durationMin:5,instruction:"Easy warm-up, 75 RPM."},
+    {zone:"z2",durationMin:50,instruction:"Steady endurance, 85–90 RPM. No surges. Hold HR all the way."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  3:["Spin Bike — First Threshold Intervals",70,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up, build to top of Z2."},
+    {zone:"z4",durationMin:10,instruction:"Threshold block 1. Pace it — don't go out hot."},
+    {zone:"z1",durationMin:5,instruction:"Recovery, easy spin."},
+    {zone:"z4",durationMin:10,instruction:"Threshold block 2. Match block 1's effort."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z2",durationMin:25,instruction:"Steady Z2 to finish."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  4:["Spin Bike — Threshold Intervals",70,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:10,instruction:"Threshold block 1."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Threshold block 2."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z2",durationMin:25,instruction:"Steady Z2."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  5:["Spin Bike — 3×10 Threshold",75,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:10,instruction:"Block 1."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Block 2."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Block 3."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z2",durationMin:15,instruction:"Steady Z2."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  6:["Spin Bike — 2×20 FTP Builder",65,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up, build the legs."},
+    {zone:"z4",durationMin:20,instruction:"The classic. Pace the first 20 — don't blow up."},
+    {zone:"z1",durationMin:10,instruction:"Recovery between efforts."},
+    {zone:"z4",durationMin:20,instruction:"Second 20. Hold it steady to the end."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  7:["Spin Bike — 2×20 + 10 Threshold",83,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:20,instruction:"Block 1 — pace it."},
+    {zone:"z1",durationMin:10,instruction:"Recovery."},
+    {zone:"z4",durationMin:20,instruction:"Block 2."},
+    {zone:"z1",durationMin:8,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Bonus 10 — finish strong."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  8:["Spin Bike — 3×15 Threshold",76,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:15,instruction:"Block 1."},
+    {zone:"z1",durationMin:8,instruction:"Recovery."},
+    {zone:"z4",durationMin:15,instruction:"Block 2."},
+    {zone:"z1",durationMin:8,instruction:"Recovery."},
+    {zone:"z4",durationMin:15,instruction:"Block 3."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  9:["Spin Bike — 2×25 Threshold",75,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:25,instruction:"Block 1 — long. Settle in and hold."},
+    {zone:"z1",durationMin:10,instruction:"Recovery."},
+    {zone:"z4",durationMin:25,instruction:"Block 2."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  10:["Spin Bike — 2×20 (repeat of Wk 6)",65,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:20,instruction:"Block 1 — compare HR/feel to week 6."},
+    {zone:"z1",durationMin:10,instruction:"Recovery."},
+    {zone:"z4",durationMin:20,instruction:"Block 2. You'll feel stronger."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  11:["Spin Bike — 2×20 Threshold",65,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:20,instruction:"Block 1."},
+    {zone:"z1",durationMin:10,instruction:"Recovery."},
+    {zone:"z4",durationMin:20,instruction:"Block 2 — last big threshold session."},
+    {zone:"z1",durationMin:5,instruction:"Cool down."}]],
+  12:["Spin Bike — 3×10 Taper",60,[
+    {zone:"z1",durationMin:10,instruction:"Warm-up."},
+    {zone:"z4",durationMin:10,instruction:"Block 1 — keep intensity, cut volume."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Block 2."},
+    {zone:"z1",durationMin:5,instruction:"Recovery."},
+    {zone:"z4",durationMin:10,instruction:"Block 3."},
+    {zone:"z1",durationMin:10,instruction:"Cool down."}]],
+};
+const FRIDAY_SPIN = ["Spin Bike — Easy Cadence (Z2)",45,[
+  {zone:"z1",durationMin:5,instruction:"Warm-up."},
+  {zone:"z2",durationMin:35,instruction:"Easy aerobic, cadence focus 90+ RPM. Not more suffering — volume and smoothness."},
+  {zone:"z1",durationMin:5,instruction:"Cool down."}]];
+
+/* --------- MTB Saturdays --------- */
+const MTB = {
+  1:[150,"116–136","2.5 hours. Hold Z2 the whole ride — no charging, no Strava segments. It will feel slower than normal. That is correct. Bring a snack."],
+  2:[150,"116–136","2.5 hours, Z2 discipline. Same as last week. On climbs spin an easier gear to keep HR from spiking."],
+  3:[180,"116–136","3 hours, Z2. On climbs: spin easier gear, keep HR from spiking above Z3. Eat something at the halfway point."],
+  4:[180,"116–136","3 hours, Z2 discipline. Settle into the rhythm. Fuel every 45 min."],
+  5:[210,"116–136","3.5 hours, Z2 steady — longest sustained effort yet. Pack food and actually eat it every 45 minutes. Train the gut."],
+  6:[240,"116–136","4 hours, Z2 discipline. Bring 3 gels or equivalent. Practice eating on the bike every 45 min."],
+  7:[240,"Z2 + 2×20 climbs","4 hours. Include 2×20 min sustained climbs at Z3–Z4 to simulate Squamish → Whistler terrain. Z2 the rest."],
+  8:[270,"Z2 + climbs","4.5 hours, Z2 base with sustained climb efforts. Start fueling at 30 min regardless of hunger."],
+  9:[300,"116–136 (race sim)","5 hours — peak volume day of the entire block. Treat it like a race simulation. Fuel every 30 min, pace the first 2 hrs conservatively, push the back half."],
+  10:[240,"116–136","4 hours, steady Z2. Recovery week in disguise — lower intensity than week 9. Let week 9 settle."],
+  11:[240,"116–136 (strong)","4 hours, strong steady effort. Last long ride of the block. Hit it well, then taper begins."],
+  12:[150,"116–136","2.5 hours, relaxed Z2. Taper ride — easy, just keep the legs turning."],
+};
+
+/* --------- day builders --------- */
+function gymDay(n,session){
+  let ex,title,dur;
+  if(n<=5){ex=GYM_P1;title="Gym — Foundation Session "+session;dur=50;}
+  else if(n<=11){ex=GYM_P2;title="Gym — Load Session "+session;dur=55;}
+  else {ex=GYM_TAPER;title="Gym — Taper (light)";dur=40;}
+  return {type:"gym",title,durationMin:dur,exercises:ex,
+    notes:gymWeightNote[n]+(session===2?" Same structure as Monday — focus on feeling the right muscles working.":" Progression rule: only add weight when you complete all reps with perfect form two sessions in a row.")};
+}
+function soccerDay(){return {type:"soccer",title:"Soccer",durationMin:90,
+  notes:"Play normally — high-intensity cross-training. Pre-soccer: 20–30 min easy spin warm-up at the work gym if time allows."};}
+function spinDay(n){const s=SPIN[n];return {type:"spin",title:s[0],durationMin:s[1],structure:s[2]};}
+function fridaySpin(){return {type:"spin",title:FRIDAY_SPIN[0],durationMin:FRIDAY_SPIN[1],structure:FRIDAY_SPIN[2]};}
+function mtbDay(n){const m=MTB[n];return {type:"mtb",title:"MTB — Long Ride",durationMin:m[0],targetHR:m[1],
+  notes:m[2],fuelReminder:m[0]>120};}
+function hikeDay(){return {type:"hike",title:"Hike / Active Recovery",durationMin:120,
+  notes:"Keep it fun. Not a training session — just movement and enjoyment. Protect this lifestyle; don't overtrain."};}
+function restDay(extra){return {type:"rest",title:"Rest or Easy Walk",durationMin:0,
+  notes:extra||"Optional 30–45 min walk. No training stress today. Recovery is where adaptation happens."};}
+
+function makeWeek(n){
+  if(n===13) return week13();
+  const d={};
+  d.monday=gymDay(n,1);
+  d.tuesday=soccerDay();
+  d.wednesday=spinDay(n);
+  d.thursday=(n===12)?restDay("Active recovery only — no gym Thursday during taper. Short walk if you like."):gymDay(n,2);
+  d.friday=(n>=7&&n<=11)?fridaySpin():restDay();
+  d.saturday=mtbDay(n);
+  d.sunday=hikeDay();
+  return d;
+}
+function week13(){
+  return {
+    monday:{type:"spin",title:"Easy Spin — Wake the Legs",durationMin:30,
+      structure:[{zone:"z2",durationMin:30,instruction:"Easy effort, high cadence 90+ RPM. Just wake the legs up. Nothing hard."}],
+      notes:"30 min easy, high cadence. You're sharp — keep it light."},
+    tuesday:{type:"soccer",title:"Soccer (light, optional)",durationMin:60,
+      notes:"Only if you feel good — light effort, don't go hard. Skip it if the legs feel heavy."},
+    wednesday:{type:"spin",title:"Openers — Easy + 3×5 Z3",durationMin:39,
+      structure:[
+        {zone:"z2",durationMin:20,instruction:"Easy spin, high cadence."},
+        {zone:"z3",durationMin:5,instruction:"Slightly elevated effort."},
+        {zone:"z1",durationMin:3,instruction:"Easy."},
+        {zone:"z3",durationMin:5,instruction:"Slightly elevated."},
+        {zone:"z1",durationMin:3,instruction:"Easy."},
+        {zone:"z3",durationMin:5,instruction:"Slightly elevated. Done."},
+        {zone:"z1",durationMin:3,instruction:"Cool down."}],
+      notes:"Short openers to keep the legs sharp. That's it — resist doing more."},
+    thursday:restDay("Complete rest. No training. Sleep well."),
+    friday:{type:"rest",title:"20 min Walk + Expo",durationMin:20,
+      notes:"20 min easy walk. Expo / package pickup at Canada Place. Big carb meal tonight (pasta, rice, potatoes)."},
+    saturday:{type:"race",title:"🏁 RACE DAY — RBC GranFondo Whistler",durationMin:235,
+      notes:"122 km, ~2,300 m. Target sub-4:00. Pace the first 70 km easy, fuel every 30 min, climb smart from Squamish. See the Race Day tab."},
+    sunday:{type:"hike",title:"Recovery — Celebrate",durationMin:0,
+      notes:"You did it. Easy walk, good food, no structure. Enjoy it."},
+  };
+}
+const workoutLibrary = {};
+for(let i=1;i<=13;i++) workoutLibrary[i]=makeWeek(i);
+
+const DAY_NAMES=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+const DAY_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const TYPE_COLORS={spin:"#3b82f6",mtb:"#22c55e",gym:"#a855f7",soccer:"#f59e0b",hike:"#84cc16",rest:"#374151",race:"#ef4444",run:"#06b6d4"};
+const TYPE_EMOJI={spin:"🔵",mtb:"🟢",gym:"🔴",soccer:"⚽",hike:"🏔️",rest:"⬜",race:"🏁",run:"🏃"};
+const TYPE_LABEL={spin:"Spin",mtb:"MTB",gym:"Gym",soccer:"Soccer",hike:"Hike",rest:"Rest",race:"Race",run:"Run"};
+const LOG_TYPES=["Spin Bike","MTB","Run","Gym","Soccer","Hike","Other"];
+const LOGTYPE_TO_KEY={"Spin Bike":"spin","MTB":"mtb","Run":"run","Gym":"gym","Soccer":"soccer","Hike":"hike","Other":"rest"};
+const KEY_TO_LOGTYPE={spin:"Spin Bike",mtb:"MTB",run:"Run",gym:"Gym",soccer:"Soccer",hike:"Hike",rest:"Other",race:"MTB"};
+
+/* ============================== HELPERS ============================== */
+function uid(){return "a-"+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
+function parseDate(s){const[y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d);}
+function fmtISO(dt){return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");}
+function addDays(s,n){const d=parseDate(s);d.setDate(d.getDate()+n);return fmtISO(d);}
+function todayISO(){return fmtISO(new Date());}
+function fmtShort(s){const d=parseDate(s);return d.toLocaleDateString("en-US",{month:"short",day:"numeric"});}
+function weekStart(n){return addDays(WEEK1_MONDAY,(n-1)*7);}
+function weekEnd(n){return addDays(WEEK1_MONDAY,(n-1)*7+6);}
+function dayDate(week,dayIdx){return addDays(WEEK1_MONDAY,(week-1)*7+dayIdx);}
+function getCurrentWeek(){
+  const diff=Math.floor((parseDate(todayISO())-parseDate(WEEK1_MONDAY))/(864e5));
+  return Math.min(13,Math.max(1,Math.floor(diff/7)+1));
+}
+function todayDayIdx(){return (new Date().getDay()+6)%7;}
+function phaseOf(n){return n<=5?"Base":n<=10?"Build":"Sharpen";}
+function phaseColor(n){return n<=5?"#3b82f6":n<=10?"#f97316":"#22c55e";}
+function daysUntilRace(){return Math.max(0,Math.floor((parseDate(ATHLETE.raceDate)-parseDate(todayISO()))/(864e5)));}
+function fmtHrs(min){const h=Math.floor(min/60),m=Math.round(min%60);return h>0?(h+"h"+(m?" "+m+"m":"")):(m+"m");}
+function weekPrescribedMin(n){return Object.values(workoutLibrary[n]).reduce((s,w)=>s+(w.durationMin||0),0);}
+
+function zoneMinutes(act){
+  // returns {z1..z5} minutes for an activity
+  const out={z1:0,z2:0,z3:0,z4:0,z5:0};
+  const dur=act.durationMinutes||0;
+  if(act.zoneDistribution){
+    for(const z of ["z1","z2","z3","z4","z5"]) out[z]=dur*(act.zoneDistribution[z]||0)/100;
+  } else if(act.avgHR){
+    out[zoneForHR(act.avgHR,ATHLETE.maxHR)]=dur;
+  } else {
+    out.z2=dur; // unknown -> assume aerobic
+  }
+  return out;
+}
+function activitiesInWeek(acts,n){
+  const s=weekStart(n),e=weekEnd(n);
+  return acts.filter(a=>a.date>=s&&a.date<=e);
+}
+
+/* ============================== STORAGE HOOK ============================== */
+function useStored(key,initial){
+  const [val,setVal]=useState(()=>{
+    try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):initial;}catch(e){return initial;}
+  });
+  useEffect(()=>{try{localStorage.setItem(key,JSON.stringify(val));}catch(e){}},[key,val]);
+  return [val,setVal];
+}
+
+/* ============================== SMALL UI ============================== */
+function Icon({name,size=18,color="currentColor",className=""}){
+  const P={
+    dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+    calendar:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    activity:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
+    bag:'<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H8a1.65 1.65 0 0 0 1-1.51V2a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V8a1.65 1.65 0 0 0 1.51 1H22a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    mountain:'<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
+    bike:'<circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 17.5 9 14l3-3.5h3"/>',
+    heart:'<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/>',
+    check:'<polyline points="20 6 9 17 4 12"/>',
+    chevron:'<polyline points="9 18 15 12 9 6"/>',
+    x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    alert:'<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    flame:'<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+    droplet:'<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
+    trending:'<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+    trophy:'<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6m12 5h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22m10 0c0-1.76-.85-3.25-2.03-3.79C14.47 17.98 14 17.55 14 17v-2.34M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+    download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    utensils:'<path d="M3 2v7c0 1.1.9 2 2 2a2 2 0 0 0 2-2V2M5 11v11M16 2v20M16 11h4a1 1 0 0 0 1-1c0-4-2-8-5-8z"/>',
+    plus:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    dumbbell:'<path d="M6 7v10M18 7v10M3.5 9.5v5M20.5 9.5v5M6 12h12"/>',
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}
+    dangerouslySetInnerHTML={{__html:P[name]||""}}/>;
+}
+function Card({children,className=""}){return <div className={"card p-5 "+className}>{children}</div>;}
+function Modal({children,onClose,wide}){
+  return <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{background:"rgba(0,0,0,.65)"}} onClick={onClose}>
+    <div className={"card modal-in w-full "+(wide?"max-w-3xl":"max-w-lg")+" max-h-[92vh] overflow-y-auto rounded-b-none sm:rounded-xl"}
+      onClick={e=>e.stopPropagation()}>{children}</div>
+  </div>;
+}
+function ZoneBadge({zone,maxHR}){
+  return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md"
+    style={{background:ZONE_COLORS[zone]+"22",color:ZONE_COLORS[zone]}}>
+    {zone.toUpperCase()} · {zoneRangeLabel(zone,maxHR)}
+  </span>;
+}
+function darkTooltip(){return {contentStyle:{background:"#1a1d27",border:"1px solid #2a2d3a",borderRadius:8,color:"#f1f5f9"},
+  labelStyle:{color:"#94a3b8"},itemStyle:{color:"#f1f5f9"}};}
+
+/* ============================== APP ============================== */
+function App(){
+  const [tab,setTab]=useState("overview");
+  const [activities,setActivities]=useStored("activities",[]);
+  const [milestones,setMilestones]=useStored("milestones",{});
+  const [weeklyNotes,setWeeklyNotes]=useStored("weekly-notes",{});
+  const [completed,setCompleted]=useStored("completed-workouts",{});
+  const [gearStatus,setGearStatus]=useStored("gear-status",{});
+  const [raceCheck,setRaceCheck]=useStored("race-checklist",{});
+  const [settings,setSettings]=useStored("settings",{name:ATHLETE.name,weightKg:ATHLETE.weightKg,maxHR:ATHLETE.maxHR,onboarded:false});
+  const [showSettings,setShowSettings]=useState(false);
+  const [showOnboard,setShowOnboard]=useState(!settings.onboarded);
+  const [dayModal,setDayModal]=useState(null); // {week,dayIdx}
+
+  // keep maxHR in sync for zone calcs
+  ATHLETE.maxHR=settings.maxHR||194; ATHLETE.name=settings.name||"Athlete";
+
+  const week=getCurrentWeek();
+
+  function addActivity(a){setActivities(prev=>[{...a,id:uid()},...prev]);}
+  function deleteActivity(id){setActivities(prev=>prev.filter(a=>a.id!==id));}
+
+  function markComplete(wk,dayIdx){
+    const key=wk+"-"+DAY_NAMES[dayIdx];
+    const w=workoutLibrary[wk][DAY_NAMES[dayIdx]];
+    setCompleted(prev=>({...prev,[key]:!prev[key]}));
+    if(!completed[key] && w.type!=="rest" && w.durationMin>0){
+      // derive a rough zone distribution
+      let zd=null;
+      if(w.structure){
+        const tot=w.structure.reduce((s,x)=>s+x.durationMin,0);
+        zd={z1:0,z2:0,z3:0,z4:0,z5:0};
+        w.structure.forEach(x=>zd[x.zone]+=100*x.durationMin/tot);
+        Object.keys(zd).forEach(k=>zd[k]=Math.round(zd[k]));
+      } else if(w.type==="mtb"){
+        zd= wk>=7&&wk<=11 ? {z1:5,z2:72,z3:13,z4:10,z5:0} : {z1:10,z2:83,z3:5,z4:2,z5:0};
+      }
+      addActivity({date:dayDate(wk,dayIdx),type:KEY_TO_LOGTYPE[w.type],durationMinutes:w.durationMin,
+        distanceKm:null,elevationM:null,avgHR:null,maxHR:null,perceivedEffort:5,
+        zoneDistribution:zd,fromStrava:false,notes:"Marked complete from plan.",completedPlanWorkout:"Week "+wk+" "+DAY_SHORT[dayIdx]+" "+TYPE_LABEL[w.type]});
+    }
+  }
+
+  const tabs=[
+    {id:"overview",label:"Overview",icon:"dashboard"},
+    {id:"plan",label:"Training Plan",icon:"calendar"},
+    {id:"log",label:"Log Activity",icon:"activity"},
+    {id:"progress",label:"Progress",icon:"trending"},
+    {id:"race",label:"Race Day",icon:"flag"},
+    {id:"gear",label:"Gear & Nutrition",icon:"bag"},
+  ];
+
+  return <div className="min-h-screen pb-16">
+    {/* NAV */}
+    <header className="sticky top-0 z-40 backdrop-blur" style={{background:"rgba(15,17,23,.92)",borderBottom:"1px solid var(--border)"}}>
+      <div className="max-w-6xl mx-auto px-4">
+        <div className="flex items-center justify-between py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{background:"var(--accent)"}}>
+              <Icon name="bike" size={20} color="#fff"/>
+            </div>
+            <div>
+              <div className="font-bold leading-tight">GranFondo Whistler</div>
+              <div className="text-xs" style={{color:"var(--text2)"}}>{daysUntilRace()} days out · Week {week} · {phaseOf(week)}</div>
+            </div>
+          </div>
+          <button onClick={()=>setShowSettings(true)} className="btn btn-outline p-2"><Icon name="settings" size={18}/></button>
+        </div>
+        <nav className="flex gap-1 overflow-x-auto -mb-px">
+          {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)}
+            className={"flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium whitespace-nowrap "+(tab===t.id?"tab-active":"")}
+            style={{color:tab===t.id?"var(--text)":"var(--text2)"}}>
+            <Icon name={t.icon} size={16}/>{t.label}
+          </button>)}
+        </nav>
+      </div>
+    </header>
+
+    <main className="max-w-6xl mx-auto px-4 pt-6 fade-in" key={tab}>
+      {tab==="overview" && <Overview {...{week,activities,settings,weeklyNotes,setTab,setDayModal}}/>}
+      {tab==="plan" && <Plan {...{week,completed,setDayModal}}/>}
+      {tab==="log" && <LogActivity {...{addActivity,activities,deleteActivity,settings}}/>}
+      {tab==="progress" && <Progress {...{activities,milestones,setMilestones,weeklyNotes,setWeeklyNotes,week,settings}}/>}
+      {tab==="race" && <RaceDay {...{raceCheck,setRaceCheck}}/>}
+      {tab==="gear" && <GearNutrition {...{gearStatus,setGearStatus}}/>}
+    </main>
+
+    {dayModal && <WorkoutModal {...dayModal} completed={completed} onClose={()=>setDayModal(null)}
+      onComplete={()=>markComplete(dayModal.week,dayModal.dayIdx)} maxHR={settings.maxHR}/>}
+    {showSettings && <SettingsModal {...{settings,setSettings,activities,onClose:()=>setShowSettings(false)}}/>}
+    {showOnboard && <Onboard onClose={()=>{setSettings(s=>({...s,onboarded:true}));setShowOnboard(false);}}/>}
+  </div>;
+}
+
+/* ============================== OVERVIEW ============================== */
+function Overview({week,activities,settings,weeklyNotes,setTab,setDayModal}){
+  const dayIdx=todayDayIdx();
+  const today=workoutLibrary[week][DAY_NAMES[dayIdx]];
+  const wkActs=activitiesInWeek(activities,week);
+  const loggedMin=wkActs.reduce((s,a)=>s+(a.durationMinutes||0),0);
+  const targetMin=weekPrescribedMin(week);
+  const pct=Math.min(100,Math.round(loggedMin/targetMin*100||0));
+  const totalMin=activities.reduce((s,a)=>s+(a.durationMinutes||0),0);
+  const rides=activities.filter(a=>a.type==="MTB"||a.type==="Spin Bike");
+  const longest=rides.reduce((m,a)=>Math.max(m,a.durationMinutes||0),0);
+  // week zone pie
+  const zsum={z1:0,z2:0,z3:0,z4:0,z5:0};
+  wkActs.forEach(a=>{const zm=zoneMinutes(a);for(const z in zm)zsum[z]+=zm[z];});
+  const zTot=Object.values(zsum).reduce((a,b)=>a+b,0);
+  const pieData=Object.keys(zsum).filter(z=>zsum[z]>0).map(z=>({name:z.toUpperCase(),value:zsum[z],z}));
+  // last activity reminder
+  const lastDate=activities.length?activities.map(a=>a.date).sort().slice(-1)[0]:null;
+  const gap=lastDate?Math.floor((parseDate(todayISO())-parseDate(lastDate))/(864e5)):null;
+  const eighty=zTot>0?Math.round((zsum.z1+zsum.z2)/zTot*100):null;
+
+  return <div className="space-y-5">
+    {activities.length>0 && gap>=3 &&
+      <div className="card p-3 flex items-center gap-2 text-sm" style={{borderColor:"var(--warning)",background:"#f59e0b14"}}>
+        <Icon name="alert" size={18} color="var(--warning)"/>
+        <span>You haven't logged an activity in {gap} days — stay on track!</span>
+      </div>}
+
+    {/* HERO */}
+    <div className="card p-6" style={{background:"linear-gradient(135deg,#1a1d27,#171a2e)"}}>
+      <div className="grid md:grid-cols-3 gap-6">
+        <div className="md:col-span-1">
+          <div className="text-xs uppercase tracking-wide" style={{color:"var(--text2)"}}>Countdown</div>
+          <div className="text-5xl font-extrabold mono" style={{color:"var(--accent)"}}>{daysUntilRace()}</div>
+          <div className="text-sm" style={{color:"var(--text2)"}}>days until GranFondo Whistler</div>
+          <div className="mt-3 flex gap-2">
+            <span className="text-xs px-2 py-1 rounded-md" style={{background:"#3b82f622",color:"var(--accent)"}}>Week {week} of 13</span>
+            <span className="text-xs px-2 py-1 rounded-md" style={{background:phaseColor(week)+"22",color:phaseColor(week)}}>{phaseOf(week)} phase</span>
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm font-medium">Weekly training load</span>
+            <span className="text-sm mono" style={{color:"var(--text2)"}}>{fmtHrs(loggedMin)} / {fmtHrs(targetMin)} target</span>
+          </div>
+          <div className="w-full h-3 rounded-full overflow-hidden" style={{background:"#0f1117"}}>
+            <div className="h-full rounded-full transition-all" style={{width:pct+"%",background:pct>=100?"var(--success)":"var(--accent)"}}/>
+          </div>
+          <div className="text-xs mt-1" style={{color:"var(--text2)"}}>{pct}% of this week's prescribed hours logged</div>
+
+          <div className="mt-4 card p-4 cursor-pointer hover:border-blue-500 transition" style={{background:"#0f1117"}}
+            onClick={()=>setDayModal({week,dayIdx})}>
+            <div className="text-xs uppercase tracking-wide" style={{color:"var(--text2)"}}>Today · {DAY_SHORT[dayIdx]}</div>
+            <div className="flex items-center justify-between mt-1">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">{TYPE_EMOJI[today.type]}</span>
+                <span className="font-bold">{today.title}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm" style={{color:"var(--text2)"}}>
+                {today.durationMin>0 && <span className="mono">{fmtHrs(today.durationMin)}</span>}
+                <Icon name="chevron" size={16}/>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* QUICK STATS */}
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <Stat icon="clock" label="Total hours logged" value={fmtHrs(totalMin)} sub={activities.length+" activities"}/>
+      <Stat icon="mountain" label="Longest ride" value={longest?fmtHrs(longest):"—"} sub="spin or MTB"/>
+      <Stat icon="flag" label="Weeks remaining" value={Math.max(0,13-week)} sub={"of 13"}/>
+      <div className="card p-4">
+        <div className="text-xs" style={{color:"var(--text2)"}}>Zone mix this week</div>
+        {zTot>0?
+          <div className="flex items-center gap-2 mt-1">
+            <ResponsiveContainer width={64} height={64}>
+              <PieChart><Pie data={pieData} dataKey="value" innerRadius={16} outerRadius={30} paddingAngle={1}>
+                {pieData.map((e,i)=><Cell key={i} fill={ZONE_COLORS[e.z]}/>)}
+              </Pie></PieChart>
+            </ResponsiveContainer>
+            <div className="text-xs leading-tight">
+              {eighty!==null && <div className="font-bold text-base" style={{color:eighty>=80?"var(--success)":eighty>=70?"var(--warning)":"var(--danger)"}}>{eighty}%</div>}
+              <div style={{color:"var(--text2)"}}>in Z1–Z2</div>
+            </div>
+          </div>
+          : <div className="text-sm mt-2" style={{color:"var(--text2)"}}>No data yet this week</div>}
+      </div>
+    </div>
+
+    {/* COACH NOTE */}
+    <div className="card p-5" style={{borderColor:"var(--accent)"}}>
+      <div className="flex items-center gap-2 mb-1">
+        <Icon name="flame" size={18} color="var(--accent)"/>
+        <span className="font-bold">Coach's note — Week {week}</span>
+      </div>
+      <p style={{color:"var(--text)"}}>{coachNotes[week]}</p>
+    </div>
+
+    {week>=11 && <div className="card p-4 text-sm" style={{borderColor:"var(--warning)"}}>
+      <span className="font-semibold" style={{color:"var(--warning)"}}>Taper mode:</span> Trust the process. Cut volume, keep intensity, sleep more, eat more carbs. The fitness is already in the bank.
+    </div>}
+  </div>;
+}
+function Stat({icon,label,value,sub}){
+  return <div className="card p-4">
+    <div className="flex items-center gap-2 text-xs" style={{color:"var(--text2)"}}><Icon name={icon} size={14}/>{label}</div>
+    <div className="text-2xl font-bold mono mt-1">{value}</div>
+    <div className="text-xs" style={{color:"var(--text2)"}}>{sub}</div>
+  </div>;
+}
+
+/* ============================== TRAINING PLAN ============================== */
+function Plan({week,completed,setDayModal}){
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h2 className="text-xl font-bold">13-Week Plan</h2>
+      <div className="flex flex-wrap gap-3 text-xs" style={{color:"var(--text2)"}}>
+        {Object.keys(TYPE_EMOJI).filter(t=>t!=="run").map(t=>
+          <span key={t} className="flex items-center gap-1">{TYPE_EMOJI[t]} {TYPE_LABEL[t]}</span>)}
+      </div>
+    </div>
+    <div className="card p-3 overflow-x-auto">
+      <table className="w-full border-collapse" style={{minWidth:680}}>
+        <thead><tr>
+          <th className="text-left text-xs font-semibold p-2" style={{color:"var(--text2)"}}>Week</th>
+          {DAY_SHORT.map(d=><th key={d} className="text-xs font-semibold p-2" style={{color:"var(--text2)"}}>{d}</th>)}
+        </tr></thead>
+        <tbody>
+          {Array.from({length:13},(_,i)=>i+1).map(n=>{
+            const isCur=n===week;
+            return <tr key={n} style={isCur?{background:"#3b82f60d",outline:"1px solid #3b82f644"}:{}}>
+              <td className="p-2 align-middle">
+                <div className="text-sm font-bold">Wk {n}</div>
+                <div className="text-[10px]" style={{color:phaseColor(n)}}>{phaseOf(n)}</div>
+                <div className="text-[10px]" style={{color:"var(--text2)"}}>{fmtShort(weekStart(n))}</div>
+              </td>
+              {DAY_NAMES.map((dn,di)=>{
+                const w=workoutLibrary[n][dn];
+                const key=n+"-"+dn;
+                const done=completed[key];
+                return <td key={dn} className="p-1">
+                  <button onClick={()=>setDayModal({week:n,dayIdx:di})}
+                    className="w-full rounded-lg p-2 text-left relative transition hover:scale-[1.03]"
+                    style={{background:TYPE_COLORS[w.type]+(w.type==="rest"?"55":"26"),border:"1px solid "+TYPE_COLORS[w.type]+"55",minHeight:54}}>
+                    <div className="text-base leading-none">{TYPE_EMOJI[w.type]}</div>
+                    <div className="text-[10px] mt-1 leading-tight" style={{color:"var(--text)"}}>{TYPE_LABEL[w.type]}</div>
+                    {w.durationMin>0 && <div className="text-[9px] mono" style={{color:"var(--text2)"}}>{fmtHrs(w.durationMin)}</div>}
+                    {done && <div className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{background:"var(--success)"}}>
+                      <Icon name="check" size={11} color="#0f1117"/></div>}
+                  </button>
+                </td>;
+              })}
+            </tr>;
+          })}
+        </tbody>
+      </table>
+    </div>
+    <p className="text-xs" style={{color:"var(--text2)"}}>Tap any day for the full workout. Current week is highlighted.</p>
+  </div>;
+}
+
+function WorkoutModal({week,dayIdx,completed,onClose,onComplete,maxHR}){
+  const w=workoutLibrary[week][DAY_NAMES[dayIdx]];
+  const key=week+"-"+DAY_NAMES[dayIdx];
+  const done=completed[key];
+  let acc=0;
+  return <Modal onClose={onClose} wide>
+    <div className="p-5">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-xs" style={{color:"var(--text2)"}}>Week {week} · {DAY_SHORT[dayIdx]} · {fmtShort(dayDate(week,dayIdx))} · <span style={{color:phaseColor(week)}}>{phaseOf(week)}</span></div>
+          <h3 className="text-xl font-bold flex items-center gap-2">{TYPE_EMOJI[w.type]} {w.title}</h3>
+          {w.durationMin>0 && <div className="text-sm mono" style={{color:"var(--text2)"}}>Target: {fmtHrs(w.durationMin)}{w.targetHR?" · HR "+w.targetHR:""}</div>}
+        </div>
+        <button onClick={onClose} className="btn btn-outline p-1.5"><Icon name="x" size={18}/></button>
+      </div>
+
+      {w.structure && <div className="space-y-1.5 mb-3">
+        <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Minute-by-minute</div>
+        {w.structure.map((s,i)=>{const start=acc;acc+=s.durationMin;return(
+          <div key={i} className="flex items-start gap-3 p-2 rounded-lg" style={{background:"#0f1117"}}>
+            <div className="mono text-xs pt-0.5 w-16 shrink-0" style={{color:"var(--text2)"}}>{start}–{acc}m</div>
+            <ZoneBadge zone={s.zone} maxHR={maxHR}/>
+            <div className="text-sm flex-1">{s.instruction}</div>
+          </div>);})}
+      </div>}
+
+      {w.exercises && <div className="space-y-1.5 mb-3">
+        <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Exercises (in order)</div>
+        {w.exercises.map((e,i)=>(
+          <div key={i} className="p-2.5 rounded-lg" style={{background:"#0f1117"}}>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold flex items-center gap-2"><Icon name="dumbbell" size={15} color="#a855f7"/>{e.name}</span>
+              <span className="mono text-sm" style={{color:"var(--text2)"}}>{e.sets} × {e.reps}</span>
+            </div>
+            <div className="text-xs mt-0.5" style={{color:"var(--text2)"}}>{e.notes}</div>
+          </div>))}
+      </div>}
+
+      {w.type==="mtb" && <div className="mb-3 p-3 rounded-lg text-sm" style={{background:"#22c55e14"}}>
+        <span className="font-semibold" style={{color:"var(--success)"}}>Terrain & HR:</span> Hold {w.targetHR}. On climbs, spin an easier gear — don't let HR spike into Z3 on easy days.
+        {w.fuelReminder && <div className="mt-1 flex items-center gap-1"><Icon name="flame" size={14} color="var(--warning)"/> Fuel every 30–45 min — ~30 g carbs. Train the gut.</div>}
+      </div>}
+
+      {w.notes && <div className="p-3 rounded-lg text-sm" style={{background:"#1a1d27",border:"1px solid var(--border)"}}>
+        <span style={{color:"var(--text2)"}}>{w.notes}</span></div>}
+
+      {w.type!=="rest" && w.type!=="race" &&
+        <button onClick={onComplete} className={"btn w-full mt-4 py-2.5 flex items-center justify-center gap-2 "+(done?"btn-outline":"btn-primary")}>
+          <Icon name="check" size={18}/>{done?"Completed — tap to undo":"Mark as Complete"}
+        </button>}
+      {w.type==="race" && <div className="btn btn-primary w-full mt-4 py-2.5 text-center" style={{background:"var(--danger)"}}>See the Race Day tab for the full briefing 🏁</div>}
+    </div>
+  </Modal>;
+}
+
+/* ============================== LOG ACTIVITY ============================== */
+function LogActivity({addActivity,activities,deleteActivity,settings}){
+  const blank={date:todayISO(),type:"MTB",hours:1,minutes:0,distanceKm:"",elevationM:"",avgHR:"",maxHR:"",
+    perceivedEffort:6,useZones:false,z1:0,z2:70,z3:15,z4:15,z5:0,notes:"",fromStrava:false};
+  const [f,setF]=useState(blank);
+  const zoneSum=f.z1+f.z2+f.z3+f.z4+f.z5;
+  const dur=f.hours*60+Number(f.minutes);
+  function submit(){
+    if(dur<=0){alert("Add a duration.");return;}
+    if(f.useZones && zoneSum!==100){alert("Zone percentages must sum to 100 (currently "+zoneSum+").");return;}
+    addActivity({
+      date:f.date,type:f.type,durationMinutes:dur,
+      distanceKm:f.distanceKm===""?null:Number(f.distanceKm),
+      elevationM:f.elevationM===""?null:Number(f.elevationM),
+      avgHR:f.avgHR===""?null:Number(f.avgHR),
+      maxHR:f.maxHR===""?null:Number(f.maxHR),
+      perceivedEffort:f.perceivedEffort,
+      zoneDistribution:f.useZones?{z1:f.z1,z2:f.z2,z3:f.z3,z4:f.z4,z5:f.z5}:null,
+      fromStrava:f.fromStrava,notes:f.notes,completedPlanWorkout:null
+    });
+    setF({...blank,date:f.date});
+  }
+  const up=(k,v)=>setF(p=>({...p,[k]:v}));
+  const recent=activities.slice(0,7);
+  return <div className="grid lg:grid-cols-3 gap-5">
+    <div className="lg:col-span-2 space-y-4">
+      <Card>
+        <h2 className="text-lg font-bold mb-3 flex items-center gap-2"><Icon name="plus" size={18}/>Log an activity</h2>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Date"><input type="date" value={f.date} onChange={e=>up("date",e.target.value)} className="w-full px-3 py-2"/></Field>
+          <Field label="Activity type"><select value={f.type} onChange={e=>up("type",e.target.value)} className="w-full px-3 py-2">
+            {LOG_TYPES.map(t=><option key={t}>{t}</option>)}</select></Field>
+          <Field label="Duration">
+            <div className="flex gap-2">
+              <input type="number" min="0" value={f.hours} onChange={e=>up("hours",Number(e.target.value))} className="w-full px-3 py-2" placeholder="h"/>
+              <span className="self-center text-xs" style={{color:"var(--text2)"}}>h</span>
+              <input type="number" min="0" max="59" value={f.minutes} onChange={e=>up("minutes",Number(e.target.value))} className="w-full px-3 py-2" placeholder="m"/>
+              <span className="self-center text-xs" style={{color:"var(--text2)"}}>m</span>
+            </div>
+          </Field>
+          <Field label="Distance (km, optional)"><input type="number" value={f.distanceKm} onChange={e=>up("distanceKm",e.target.value)} className="w-full px-3 py-2"/></Field>
+          <Field label="Elevation (m, optional)"><input type="number" value={f.elevationM} onChange={e=>up("elevationM",e.target.value)} className="w-full px-3 py-2"/></Field>
+          <Field label="Average HR (bpm)"><input type="number" value={f.avgHR} onChange={e=>up("avgHR",e.target.value)} className="w-full px-3 py-2"/></Field>
+          <Field label="Max HR (bpm)"><input type="number" value={f.maxHR} onChange={e=>up("maxHR",e.target.value)} className="w-full px-3 py-2"/></Field>
+          <Field label={"Perceived effort: "+f.perceivedEffort+"/10"}>
+            <input type="range" min="1" max="10" value={f.perceivedEffort} onChange={e=>up("perceivedEffort",Number(e.target.value))} className="w-full"/>
+          </Field>
+        </div>
+
+        <div className="mt-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={f.useZones} onChange={e=>up("useZones",e.target.checked)}/>
+            Enter HR zone distribution (from Strava)
+          </label>
+          {f.useZones && <div className="mt-2 p-3 rounded-lg space-y-2" style={{background:"#0f1117"}}>
+            {["z1","z2","z3","z4","z5"].map(z=>
+              <div key={z} className="flex items-center gap-2">
+                <span className="text-xs w-7 font-semibold" style={{color:ZONE_COLORS[z]}}>{z.toUpperCase()}</span>
+                <input type="range" min="0" max="100" value={f[z]} onChange={e=>up(z,Number(e.target.value))} className="flex-1"/>
+                <span className="mono text-xs w-9 text-right">{f[z]}%</span>
+              </div>)}
+            <div className="text-xs text-right mono" style={{color:zoneSum===100?"var(--success)":"var(--danger)"}}>Sum: {zoneSum}% {zoneSum===100?"✓":"(must = 100)"}</div>
+          </div>}
+        </div>
+
+        <Field label="Notes" className="mt-3"><textarea rows="2" value={f.notes} onChange={e=>up("notes",e.target.value)} className="w-full px-3 py-2" placeholder="Fromme upper. Felt strong on the climbs..."/></Field>
+        <label className="flex items-center gap-2 text-sm mt-2 cursor-pointer">
+          <input type="checkbox" checked={f.fromStrava} onChange={e=>up("fromStrava",e.target.checked)}/> Pulled from Strava
+        </label>
+        <button onClick={submit} className="btn btn-primary w-full mt-3 py-2.5">Save activity</button>
+      </Card>
+
+      <Card>
+        <h3 className="font-bold mb-2">Recent activity</h3>
+        {recent.length===0?<p className="text-sm" style={{color:"var(--text2)"}}>Nothing logged yet.</p>:
+          <div className="overflow-x-auto"><table className="w-full text-sm">
+            <thead><tr style={{color:"var(--text2)"}} className="text-xs text-left">
+              <th className="p-1.5">Date</th><th className="p-1.5">Type</th><th className="p-1.5">Time</th>
+              <th className="p-1.5">Avg HR</th><th className="p-1.5">RPE</th><th className="p-1.5">Notes</th><th></th>
+            </tr></thead>
+            <tbody>{recent.map(a=><tr key={a.id} style={{borderTop:"1px solid var(--border)"}}>
+              <td className="p-1.5 mono whitespace-nowrap">{fmtShort(a.date)}</td>
+              <td className="p-1.5"><span className="px-1.5 py-0.5 rounded text-xs" style={{background:TYPE_COLORS[LOGTYPE_TO_KEY[a.type]]+"33"}}>{a.type}</span></td>
+              <td className="p-1.5 mono">{fmtHrs(a.durationMinutes)}</td>
+              <td className="p-1.5 mono">{a.avgHR||"—"}</td>
+              <td className="p-1.5 mono">{a.perceivedEffort||"—"}</td>
+              <td className="p-1.5 max-w-[160px] truncate" style={{color:"var(--text2)"}}>{a.notes}</td>
+              <td className="p-1.5"><button onClick={()=>deleteActivity(a.id)} style={{color:"var(--text2)"}}><Icon name="x" size={14}/></button></td>
+            </tr>)}</tbody>
+          </table></div>}
+      </Card>
+    </div>
+
+    <div className="space-y-4">
+      <div className="card p-4" style={{borderColor:"var(--accent)"}}>
+        <div className="flex items-center gap-2 font-semibold mb-1"><Icon name="heart" size={16} color="var(--accent)"/>Strava import</div>
+        <p className="text-sm" style={{color:"var(--text2)"}}>After each ride, open Strava → tap the activity → scroll to <b style={{color:"var(--text)"}}>Heart Rate Zones</b>. Enter the zone % breakdown above. Your Garmin syncs automatically to Strava — this takes 30 seconds.</p>
+      </div>
+      <div className="card p-4">
+        <div className="font-semibold mb-2 text-sm">HR Zones (max {settings.maxHR})</div>
+        {["z1","z2","z3","z4","z5"].map(z=><div key={z} className="flex items-center justify-between py-1 text-sm">
+          <span className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{background:ZONE_COLORS[z]}}/>{z.toUpperCase()} {ZONE_NAMES[z]}</span>
+          <span className="mono" style={{color:"var(--text2)"}}>{zoneRangeLabel(z,settings.maxHR)}</span>
+        </div>)}
+      </div>
+    </div>
+  </div>;
+}
+function Field({label,children,className=""}){
+  return <label className={"block "+className}><span className="text-xs font-medium" style={{color:"var(--text2)"}}>{label}</span><div className="mt-1">{children}</div></label>;
+}
+
+/* ============================== PROGRESS ============================== */
+function Progress({activities,milestones,setMilestones,weeklyNotes,setWeeklyNotes,week,settings}){
+  const tt=darkTooltip();
+  // weekly load
+  const loadData=Array.from({length:13},(_,i)=>{
+    const n=i+1;const acts=activitiesInWeek(activities,n);
+    const logged=acts.reduce((s,a)=>s+(a.durationMinutes||0),0)/60;
+    return {week:"W"+n,n,logged:+logged.toFixed(1),target:+(weekPrescribedMin(n)/60).toFixed(1),future:n>week};
+  });
+  // zone stacked
+  const zoneData=loadData.map(d=>{
+    const acts=activitiesInWeek(activities,d.n);const z={z1:0,z2:0,z3:0,z4:0,z5:0};
+    acts.forEach(a=>{const zm=zoneMinutes(a);for(const k in zm)z[k]+=zm[k]/60;});
+    return {week:d.week,...Object.fromEntries(Object.entries(z).map(([k,v])=>[k,+v.toFixed(2)]))};
+  });
+  // activity type donut last 4 weeks
+  const cutoff=addDays(todayISO(),-28);
+  const typeAgg={};
+  activities.filter(a=>a.date>=cutoff).forEach(a=>{typeAgg[a.type]=(typeAgg[a.type]||0)+(a.durationMinutes||0)/60;});
+  const donut=Object.entries(typeAgg).map(([k,v])=>({name:k,value:+v.toFixed(1),key:LOGTYPE_TO_KEY[k]}));
+  // longest ride trend (Saturdays / MTB)
+  const longRides=activities.filter(a=>a.type==="MTB").slice().sort((a,b)=>a.date<b.date?-1:1)
+    .map(a=>({date:fmtShort(a.date),hours:+(a.durationMinutes/60).toFixed(1)}));
+  // HR trend by type
+  const hrActs=activities.filter(a=>a.avgHR).slice().sort((a,b)=>a.date<b.date?-1:1);
+  const hrData=hrActs.map(a=>({date:fmtShort(a.date),type:a.type,avgHR:a.avgHR}));
+
+  const MILES=[
+    {id:"m1",label:"Completed first 3-hour MTB at Z2"},
+    {id:"m2",label:"First 2×20 min threshold session"},
+    {id:"m3",label:"First 4-hour ride"},
+    {id:"m4",label:"Practiced fueling every 30 min on a long ride"},
+    {id:"m5",label:"Completed 5-hour MTB ride"},
+    {id:"m6",label:"Did a pre-race road bike ride"},
+    {id:"m7",label:"Completed race week taper"},
+  ];
+  const curNote=weeklyNotes[week]||"";
+
+  return <div className="space-y-5">
+    <div className="grid lg:grid-cols-2 gap-5">
+      <Card>
+        <h3 className="font-bold mb-1">Weekly load vs. target</h3>
+        <p className="text-xs mb-2" style={{color:"var(--text2)"}}>Bars = hours logged · line = plan target</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={loadData}>
+            <CartesianGrid stroke="#2a2d3a" vertical={false}/>
+            <XAxis dataKey="week" tick={{fill:"#94a3b8",fontSize:11}}/>
+            <YAxis tick={{fill:"#94a3b8",fontSize:11}} unit="h"/>
+            <Tooltip {...tt}/>
+            <Bar dataKey="logged" radius={[4,4,0,0]}>
+              {loadData.map((d,i)=><Cell key={i} fill={d.future?"#2a2d3a":phaseColor(d.n)} fillOpacity={d.future?0.4:1}/>)}
+            </Bar>
+            <Line dataKey="target" stroke="#f1f5f9" strokeWidth={2} dot={false} type="monotone"/>
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <Card>
+        <h3 className="font-bold mb-1">HR zone distribution</h3>
+        <p className="text-xs mb-2" style={{color:"var(--text2)"}}>Goal: Z1+Z2 ≥ 80%. Watch creeping Z3.</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={zoneData}>
+            <CartesianGrid stroke="#2a2d3a" vertical={false}/>
+            <XAxis dataKey="week" tick={{fill:"#94a3b8",fontSize:11}}/>
+            <YAxis tick={{fill:"#94a3b8",fontSize:11}} unit="h"/>
+            <Tooltip {...tt}/>
+            {["z1","z2","z3","z4","z5"].map(z=><Bar key={z} dataKey={z} stackId="a" fill={ZONE_COLORS[z]}/>)}
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <Card>
+        <h3 className="font-bold mb-1">Activity mix — last 4 weeks</h3>
+        {donut.length?<ResponsiveContainer width="100%" height={240}>
+          <PieChart>
+            <Pie data={donut} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+              {donut.map((e,i)=><Cell key={i} fill={TYPE_COLORS[e.key]||"#64748b"}/>)}
+            </Pie>
+            <Tooltip {...tt}/><Legend wrapperStyle={{fontSize:12}}/>
+          </PieChart>
+        </ResponsiveContainer>:<Empty/>}
+      </Card>
+
+      <Card>
+        <h3 className="font-bold mb-1">Longest ride trend (MTB)</h3>
+        {longRides.length?<ResponsiveContainer width="100%" height={240}>
+          <LineChart data={longRides}>
+            <CartesianGrid stroke="#2a2d3a"/>
+            <XAxis dataKey="date" tick={{fill:"#94a3b8",fontSize:11}}/>
+            <YAxis tick={{fill:"#94a3b8",fontSize:11}} unit="h"/>
+            <Tooltip {...tt}/>
+            <Line dataKey="hours" stroke="#22c55e" strokeWidth={2.5} type="monotone" dot={{r:3}}/>
+          </LineChart>
+        </ResponsiveContainer>:<Empty/>}
+      </Card>
+    </div>
+
+    <Card>
+      <h3 className="font-bold mb-1">Heart rate trend</h3>
+      <p className="text-xs mb-2" style={{color:"var(--text2)"}}>As fitness builds, avg HR for the same effort should drift down — the clearest sign of progress.</p>
+      {hrData.length?<ResponsiveContainer width="100%" height={240}>
+        <LineChart data={hrData}>
+          <CartesianGrid stroke="#2a2d3a"/>
+          <XAxis dataKey="date" tick={{fill:"#94a3b8",fontSize:11}}/>
+          <YAxis tick={{fill:"#94a3b8",fontSize:11}} domain={["auto","auto"]} unit=" bpm" width={64}/>
+          <Tooltip {...tt}/>
+          <Line dataKey="avgHR" stroke="#ef4444" strokeWidth={2} type="monotone" dot={{r:3}}/>
+          <ReferenceLine y={136} stroke="#3b82f6" strokeDasharray="4 4" label={{value:"Z2 top",fill:"#3b82f6",fontSize:10}}/>
+        </LineChart>
+      </ResponsiveContainer>:<Empty msg="Log activities with an average HR to see this."/>}
+    </Card>
+
+    <div className="grid lg:grid-cols-2 gap-5">
+      <Card>
+        <h3 className="font-bold mb-3 flex items-center gap-2"><Icon name="trophy" size={18} color="var(--warning)"/>Fitness milestones</h3>
+        <div className="space-y-2">{MILES.map(m=>
+          <label key={m.id} className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-white/5">
+            <input type="checkbox" checked={!!milestones[m.id]} onChange={()=>setMilestones(p=>({...p,[m.id]:!p[m.id]}))} className="w-4 h-4"/>
+            <span className={milestones[m.id]?"line-through":""} style={{color:milestones[m.id]?"var(--text2)":"var(--text)"}}>{m.label}</span>
+          </label>)}</div>
+      </Card>
+
+      <Card>
+        <h3 className="font-bold mb-2">Weekly check-in — Week {week}</h3>
+        <textarea rows="3" value={curNote} onChange={e=>setWeeklyNotes(p=>({...p,[week]:e.target.value}))}
+          className="w-full px-3 py-2 text-sm" placeholder="How did the week feel? Energy, soreness, motivation..."/>
+        <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+          {Object.keys(weeklyNotes).filter(k=>weeklyNotes[k]).sort((a,b)=>b-a).map(k=>
+            <div key={k} className="text-sm p-2 rounded-lg" style={{background:"#0f1117"}}>
+              <span className="text-xs font-semibold" style={{color:phaseColor(+k)}}>Week {k}</span>
+              <p style={{color:"var(--text2)"}}>{weeklyNotes[k]}</p>
+            </div>)}
+        </div>
+      </Card>
+    </div>
+  </div>;
+}
+function Empty({msg="No data yet — log some activities."}){return <div className="h-[240px] flex items-center justify-center text-sm" style={{color:"var(--text2)"}}>{msg}</div>;}
+
+/* ============================== RACE DAY ============================== */
+function RaceDay({raceCheck,setRaceCheck}){
+  const [goal,setGoal]=useState("3:55");
+  const goalMin=(()=>{const[h,m]=goal.split(":").map(Number);return (h||0)*60+(m||0);})()||235;
+  const goalHrs=goalMin/60;
+  const flatKm=70,climbKm=52;
+  const Vf=(flatKm+climbKm/0.75)/goalHrs; // flat speed
+  const Vc=Vf*0.75;
+  const flatTime=flatKm/Vf*60, climbTime=climbKm/Vc*60;
+  const avg=ATHLETE.raceDistanceKm/goalHrs;
+
+  const CHECK=[
+    "Wake up by 4:00 AM","Eat big breakfast by 4:15 AM (oatmeal + banana + PB + coffee)",
+    "Pack 6–8 gels in jersey pockets","Electrolyte tabs / powder",
+    "Helmet, gloves, sunglasses","Chamois cream (if first time in road shorts)",
+    "Lights (mandatory before dawn)","Arrive Stanley Park by 6:00 AM for 7:00 AM start"];
+
+  // fueling timeline markers
+  const eatMarks=[];for(let t=30;t<=goalMin;t+=30)eatMarks.push(t);
+  const drinkMarks=[];for(let t=60;t<=goalMin;t+=60)drinkMarks.push(t);
+
+  return <div className="space-y-5">
+    <div className="card p-6 text-center" style={{background:"linear-gradient(135deg,#1a1d27,#2a1620)",borderColor:"var(--danger)"}}>
+      <div className="text-xs uppercase tracking-widest" style={{color:"var(--danger)"}}>Race Briefing</div>
+      <h2 className="text-2xl font-extrabold mt-1">RBC GranFondo Whistler</h2>
+      <div className="text-sm" style={{color:"var(--text2)"}}>Sept 12, 2026 · 122 km · ~2,300 m · Target sub-4:00 (30.5 km/h avg)</div>
+    </div>
+
+    {/* Elevation profile */}
+    <Card>
+      <h3 className="font-bold mb-3">Course profile</h3>
+      <ElevationProfile/>
+      <div className="grid sm:grid-cols-2 gap-3 mt-4 text-sm">
+        <div className="p-3 rounded-lg" style={{background:"#3b82f614"}}>
+          <span className="font-semibold" style={{color:"var(--accent)"}}>0–70 km · Stanley Park → Squamish</span>
+          <p style={{color:"var(--text2)"}}>Mostly flat with rolling hills. Furry Creek & Britannia climbs (~10 min each). Fresh legs — <b style={{color:"var(--danger)"}}>this is where people blow up. Hold back.</b></p>
+        </div>
+        <div className="p-3 rounded-lg" style={{background:"#ef444414"}}>
+          <span className="font-semibold" style={{color:"var(--danger)"}}>70–122 km · Squamish → Whistler</span>
+          <p style={{color:"var(--text2)"}}>Real climbing — long sustained ascent into the coastal mountains. This is where your training shows up. Sit, spin, breathe.</p>
+        </div>
+      </div>
+    </Card>
+
+    <div className="grid lg:grid-cols-2 gap-5">
+      {/* Pacing calculator */}
+      <Card>
+        <h3 className="font-bold mb-3 flex items-center gap-2"><Icon name="clock" size={18}/>Pacing calculator</h3>
+        <Field label="Goal finish time (h:mm)">
+          <input value={goal} onChange={e=>setGoal(e.target.value)} className="w-full px-3 py-2 mono" placeholder="3:55"/>
+        </Field>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <Metric label="Overall avg speed" value={avg.toFixed(1)+" km/h"}/>
+          <Metric label="Flat section pace" value={Vf.toFixed(1)+" km/h"} sub="km 0–70"/>
+          <Metric label="Climbing pace" value={Vc.toFixed(1)+" km/h"} sub="km 70–122 (~25% slower)"/>
+          <Metric label="Split: flat / climb" value={fmtHrs(flatTime)+" / "+fmtHrs(climbTime)}/>
+        </div>
+        <p className="text-xs mt-3" style={{color:"var(--text2)"}}>Calculator applies a 25% speed penalty to the climbing half. Find a draft group at your flat pace — it's worth 15–20 min over 122 km.</p>
+      </Card>
+
+      {/* Fueling timeline */}
+      <Card>
+        <h3 className="font-bold mb-3 flex items-center gap-2"><Icon name="flame" size={18} color="var(--warning)"/>Fueling timeline</h3>
+        <div className="relative h-2 rounded-full mb-8 mt-6" style={{background:"#0f1117"}}>
+          <div className="absolute inset-0 rounded-full" style={{background:"linear-gradient(90deg,#3b82f6,#ef4444)",opacity:.5}}/>
+          {eatMarks.map(t=><div key={"e"+t} className="absolute -top-5 text-[10px]" style={{left:(t/goalMin*100)+"%",transform:"translateX(-50%)"}}>
+            <span title={"Eat at "+fmtHrs(t)}>🍌</span></div>)}
+          {drinkMarks.map(t=><div key={"d"+t} className="absolute -bottom-6 text-[10px]" style={{left:(t/goalMin*100)+"%",transform:"translateX(-50%)"}}>
+            <span title={"Drink at "+fmtHrs(t)}>💧</span></div>)}
+          <div className="absolute -bottom-6 left-0 text-[10px] mono" style={{color:"var(--text2)"}}>0:00</div>
+          <div className="absolute -bottom-6 right-0 text-[10px] mono" style={{color:"var(--text2)"}}>{fmtHrs(goalMin)}</div>
+        </div>
+        <ul className="text-sm space-y-1 mt-6" style={{color:"var(--text2)"}}>
+          <li>🍌 <b style={{color:"var(--text)"}}>Every 30 min</b> — 1 gel / banana (~30 g carbs). Start at 0:30 regardless of hunger.</li>
+          <li>💧 <b style={{color:"var(--text)"}}>Every hour</b> — 500–750 ml fluid + electrolytes (all 5 rest stops).</li>
+          <li>🎯 Target 60–80 g carbs/hr = ~240–320 g over 4 hours.</li>
+          <li>🛑 <b style={{color:"var(--text)"}}>Km 70 (Squamish):</b> eat something substantial — only the climbing begins now.</li>
+        </ul>
+      </Card>
+    </div>
+
+    <div className="grid lg:grid-cols-2 gap-5">
+      <Card>
+        <h3 className="font-bold mb-3">Morning-of checklist</h3>
+        <div className="space-y-1.5">{CHECK.map((c,i)=>
+          <label key={i} className="flex items-center gap-3 cursor-pointer p-1.5 rounded-lg hover:bg-white/5">
+            <input type="checkbox" checked={!!raceCheck[i]} onChange={()=>setRaceCheck(p=>({...p,[i]:!p[i]}))} className="w-4 h-4"/>
+            <span className={raceCheck[i]?"line-through text-sm":"text-sm"} style={{color:raceCheck[i]?"var(--text2)":"var(--text)"}}>{c}</span>
+          </label>)}</div>
+      </Card>
+      <Card>
+        <h3 className="font-bold mb-2">Wave start & pacing rules</h3>
+        <ul className="text-sm space-y-2" style={{color:"var(--text2)"}}>
+          <li><b style={{color:"var(--text)"}}>Self-seed:</b> riders seed by expected finish. With a 4-hr goal, seed front-middle.</li>
+          <li><b style={{color:"var(--text)"}}>First 30 km:</b> HR stays Z2 (116–136). It should feel too easy. That is correct.</li>
+          <li><b style={{color:"var(--text)"}}>Climbs:</b> drop to a comfortable Z3–Z4, spin a light gear with MTB instincts. Do NOT stand and grind — sit, spin, breathe.</li>
+          <li><b style={{color:"var(--text)"}}>Last 20 km:</b> if you paced right, you'll have something left. Now you can push.</li>
+          <li><b style={{color:"var(--text)"}}>Bike:</b> get on a road bike once before race day — clip-in pedals, drop-bar brakes, higher seat. Rent from Cap's, Simon's, or The Path.</li>
+        </ul>
+      </Card>
+    </div>
+  </div>;
+}
+function Metric({label,value,sub}){
+  return <div className="p-3 rounded-lg" style={{background:"#0f1117"}}>
+    <div className="text-xs" style={{color:"var(--text2)"}}>{label}</div>
+    <div className="text-lg font-bold mono">{value}</div>
+    {sub && <div className="text-[10px]" style={{color:"var(--text2)"}}>{sub}</div>}
+  </div>;
+}
+function ElevationProfile(){
+  // stylised: flat-ish first 70km w/ 2 bumps, big climb to end. x 0..1000, y up=low value
+  const pts="0,180 80,175 160,150 200,160 260,135 320,165 420,170 500,168 560,172 620,160 700,150 780,110 860,70 940,40 1000,30";
+  const land=[
+    {x:30,label:"Stanley Park",km:"0"},{x:90,label:"Lions Gate",km:"5"},
+    {x:200,label:"Furry Creek",km:"35"},{x:300,label:"Britannia",km:"48"},
+    {x:620,label:"Squamish",km:"70"},{x:1000,label:"Whistler",km:"122"}];
+  const rest=[120,300,500,700,900];
+  return <div className="w-full overflow-x-auto">
+    <svg viewBox="0 0 1000 240" className="w-full" style={{minWidth:560}}>
+      <defs><linearGradient id="elev" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.5"/><stop offset="100%" stopColor="#3b82f6" stopOpacity="0.05"/>
+      </linearGradient></defs>
+      <polygon points={"0,210 "+pts+" 1000,210"} fill="url(#elev)"/>
+      <polyline points={pts} fill="none" stroke="#3b82f6" strokeWidth="2.5"/>
+      <line x1="0" y1="210" x2="1000" y2="210" stroke="#2a2d3a"/>
+      {rest.map((x,i)=><text key={i} x={x} y="205" fontSize="14" textAnchor="middle">⛽</text>)}
+      {land.map((l,i)=><g key={i}>
+        <line x1={l.x} y1="210" x2={l.x} y2="222" stroke="#94a3b8"/>
+        <text x={l.x} y="234" fontSize="11" fill="#94a3b8" textAnchor={i===0?"start":i===land.length-1?"end":"middle"}>{l.label}</text>
+      </g>)}
+      <text x="640" y="120" fontSize="12" fill="#ef4444" fontWeight="bold">⬆ climbing</text>
+      <text x="200" y="120" fontSize="12" fill="#3b82f6">flat · hold back</text>
+    </svg>
+  </div>;
+}
+
+/* ============================== GEAR & NUTRITION ============================== */
+function GearNutrition({gearStatus,setGearStatus}){
+  const [sub,setSub]=useState("gear");
+  return <div>
+    <div className="flex gap-2 mb-4">
+      {["gear","nutrition"].map(s=><button key={s} onClick={()=>setSub(s)}
+        className={"btn px-4 py-2 capitalize "+(sub===s?"btn-primary":"btn-outline")}>{s}</button>)}
+    </div>
+    {sub==="gear"?<Gear {...{gearStatus,setGearStatus}}/>:<Nutrition/>}
+  </div>;
+}
+function Gear({gearStatus,setGearStatus}){
+  const items=[
+    {id:"garmin",name:"Garmin Forerunner 265",price:"$450",cat:"buy",note:"Best value: multisport, wrist HR, Strava sync, training load, VO2 max, AMOLED."},
+    {id:"hrm",name:"Garmin HRM-Pro Plus chest strap",price:"$130",cat:"buy",note:"More accurate than wrist HR, especially on the spin bike. Pairs with the 265."},
+    {id:"strava",name:"Strava subscription",price:"$12/mo",cat:"buy",note:"Needed for Training Zones, Relative Effort, Fitness Score. Auto-syncs from Garmin Connect."},
+    {id:"roadbike",name:"Road bike (rent/borrow)",price:"~$200/wk",cat:"borrow",note:"1 week before. Cap's Bikes, Simon's, or The Path."},
+    {id:"shorts",name:"Padded cycling shorts (chamois)",price:"$80",cat:"buy",note:"Non-negotiable for 4 hrs in the saddle."},
+    {id:"jersey",name:"Cycling jersey w/ rear pockets",price:"$70",cat:"buy",note:"For gels & food."},
+    {id:"helmet",name:"Helmet",price:"have",cat:"have",note:"Mandatory — you likely have one from MTB."},
+    {id:"glasses",name:"Sunglasses",price:"$40",cat:"have",note:"Eye protection + glare."},
+    {id:"gloves",name:"Cycling gloves",price:"$30",cat:"borrow",note:"Optional but helps on a road bike."},
+  ];
+  const STATUS=["have","buy","borrow"];
+  const SC={have:"var(--success)",buy:"var(--accent)",borrow:"var(--warning)"};
+  return <div className="grid lg:grid-cols-3 gap-5">
+    <div className="lg:col-span-2 space-y-3">
+      <h3 className="font-bold">Equipment checklist</h3>
+      {items.map(it=>{const st=gearStatus[it.id]||it.cat;return(
+        <div key={it.id} className="card p-3 flex items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold text-sm">{it.name}</div>
+            <div className="text-xs" style={{color:"var(--text2)"}}>{it.note}</div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs mono" style={{color:"var(--text2)"}}>{it.price}</span>
+            <div className="flex rounded-lg overflow-hidden" style={{border:"1px solid var(--border)"}}>
+              {STATUS.map(s=><button key={s} onClick={()=>setGearStatus(p=>({...p,[it.id]:s}))}
+                className="text-[11px] px-2 py-1 capitalize" style={{background:st===s?SC[s]:"transparent",color:st===s?"#0f1117":"var(--text2)",fontWeight:st===s?700:400}}>{s}</button>)}
+            </div>
+          </div>
+        </div>);})}
+    </div>
+    <div className="space-y-4">
+      <div className="card p-4">
+        <h3 className="font-bold mb-2 text-sm flex items-center gap-2"><Icon name="bag" size={16}/>Buy-now total</h3>
+        <div className="text-sm space-y-1" style={{color:"var(--text2)"}}>
+          <div className="flex justify-between"><span>Forerunner 265</span><span className="mono">$450</span></div>
+          <div className="flex justify-between"><span>HRM-Pro Plus</span><span className="mono">$130</span></div>
+          <div className="flex justify-between"><span>Strava (3 mo)</span><span className="mono">$36</span></div>
+          <div className="flex justify-between"><span>Shorts + jersey</span><span className="mono">$150</span></div>
+          <div className="flex justify-between font-bold pt-1" style={{color:"var(--text)",borderTop:"1px solid var(--border)"}}><span>≈ Total</span><span className="mono">$766 CAD</span></div>
+        </div>
+      </div>
+      <div className="card p-4" style={{borderColor:"var(--accent)"}}>
+        <h3 className="font-bold mb-1 text-sm">Garmin setup</h3>
+        <ol className="text-xs space-y-1 list-decimal pl-4" style={{color:"var(--text2)"}}>
+          <li>Garmin Connect → User Settings → Heart Rate Zones.</li>
+          <li>Set Max HR = 194 (or your tested value).</li>
+          <li>Choose "% Max HR" zones — match the Z1–Z5 ranges in this app.</li>
+          <li>Connect → Strava under Connected Apps. Rides now sync automatically.</li>
+        </ol>
+      </div>
+    </div>
+  </div>;
+}
+function Nutrition(){
+  const fuel=[
+    ["SiS Gel","22 g","Easy on stomach, no water needed"],
+    ["Maurten 100","25 g","Premium, very gut-friendly"],
+    ["GU Energy Gel","22 g","Widely available"],
+    ["Banana (medium)","27 g","At rest stops, real food"],
+    ["Medjool date (2 pcs)","36 g","DIY, cheap, tasty"],
+    ["Rice cake (homemade)","~30 g","Best for long rides"],
+  ];
+  return <div className="grid lg:grid-cols-2 gap-5">
+    <Card>
+      <h3 className="font-bold mb-2 flex items-center gap-2"><Icon name="utensils" size={18}/>Pre-ride meals</h3>
+      <ul className="text-sm space-y-2" style={{color:"var(--text2)"}}>
+        <li><b style={{color:"var(--text)"}}>Race morning (3 hrs before):</b> oatmeal + banana + peanut butter + coffee (~80–100 g carbs).</li>
+        <li><b style={{color:"var(--text)"}}>Long-ride morning:</b> toast + honey + banana, or oats. Eat 90 min before.</li>
+        <li><b style={{color:"var(--text)"}}>Race week Wed–Fri:</b> more carbs than usual. Big carb meal Friday night (pasta, rice, potatoes).</li>
+      </ul>
+    </Card>
+    <Card>
+      <h3 className="font-bold mb-2">On-bike fuel options</h3>
+      <table className="w-full text-sm">
+        <thead><tr className="text-xs text-left" style={{color:"var(--text2)"}}><th className="p-1.5">Product</th><th className="p-1.5">Carbs</th><th className="p-1.5">Notes</th></tr></thead>
+        <tbody>{fuel.map((r,i)=><tr key={i} style={{borderTop:"1px solid var(--border)"}}>
+          <td className="p-1.5 font-medium">{r[0]}</td><td className="p-1.5 mono" style={{color:"var(--success)"}}>{r[1]}</td>
+          <td className="p-1.5 text-xs" style={{color:"var(--text2)"}}>{r[2]}</td></tr>)}</tbody>
+      </table>
+    </Card>
+    <Card>
+      <h3 className="font-bold mb-2 flex items-center gap-2"><Icon name="flame" size={18} color="var(--warning)"/>Gut training protocol</h3>
+      <p className="text-sm" style={{color:"var(--text2)"}}>Start with <b style={{color:"var(--text)"}}>30 g/hr</b> on your first long ride. Add <b style={{color:"var(--text)"}}>10 g/hr</b> each subsequent long ride until you reach <b style={{color:"var(--text)"}}>60–80 g/hr</b>. Your gut adapts to absorb more — it takes 3–4 weeks of practice. Practice this on ALL long rides; your gut needs training too.</p>
+    </Card>
+    <Card>
+      <h3 className="font-bold mb-2 flex items-center gap-2"><Icon name="droplet" size={18} color="var(--accent)"/>Electrolytes</h3>
+      <p className="text-sm" style={{color:"var(--text2)"}}>September in BC can be warm. Add electrolytes (Nuun tabs, Precision Hydration, or a pinch of salt + honey in a bottle) on any ride over 2 hrs. Aim 500–750 ml fluid per hour.</p>
+    </Card>
+  </div>;
+}
+
+/* ============================== SETTINGS / ONBOARD ============================== */
+function SettingsModal({settings,setSettings,activities,onClose}){
+  const [s,setS]=useState(settings);
+  function save(){setSettings({...s,onboarded:true});onClose();}
+  function exportCSV(){
+    const cols=["date","type","durationMinutes","distanceKm","elevationM","avgHR","maxHR","perceivedEffort","z1","z2","z3","z4","z5","fromStrava","notes","completedPlanWorkout"];
+    const rows=activities.map(a=>{const z=a.zoneDistribution||{};return cols.map(c=>{
+      let v= c in z?z[c]: a[c]; if(["z1","z2","z3","z4","z5"].includes(c)) v=z[c]??"";
+      v=(v??"").toString().replace(/"/g,'""'); return /[",\n]/.test(v)?'"'+v+'"':v;}).join(",");});
+    const csv=cols.join(",")+"\n"+rows.join("\n");
+    const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download="granfondo-training-log.csv";a.click();URL.revokeObjectURL(url);
+  }
+  function resetAll(){if(confirm("Delete ALL data (activities, milestones, notes)? This cannot be undone.")){
+    ["activities","milestones","weekly-notes","completed-workouts","gear-status","race-checklist","settings"].forEach(k=>localStorage.removeItem(k));
+    location.reload();}}
+  return <Modal onClose={onClose}>
+    <div className="p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-bold">Settings</h3>
+        <button onClick={onClose} className="btn btn-outline p-1.5"><Icon name="x" size={18}/></button>
+      </div>
+      <Field label="Name"><input value={s.name} onChange={e=>setS({...s,name:e.target.value})} className="w-full px-3 py-2"/></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Weight (kg)"><input type="number" value={s.weightKg} onChange={e=>setS({...s,weightKg:Number(e.target.value)})} className="w-full px-3 py-2"/></Field>
+        <Field label="Max HR (bpm)"><input type="number" value={s.maxHR} onChange={e=>setS({...s,maxHR:Number(e.target.value)})} className="w-full px-3 py-2"/></Field>
+      </div>
+      <div className="p-3 rounded-lg text-xs" style={{background:"#0f1117",color:"var(--text2)"}}>
+        <b style={{color:"var(--text)"}}>HR max test (optional, after 2 weeks):</b> Warm up 15 min → 3×3 min hard on the spin bike (2 min rest) → final effort all-out 60 sec. The highest HR you see = your max. Update it above and all zones recalculate.
+      </div>
+      <div className="flex flex-col gap-2">
+        <button onClick={exportCSV} className="btn btn-outline py-2 flex items-center justify-center gap-2"><Icon name="download" size={16}/>Export training log (CSV)</button>
+        <button onClick={save} className="btn btn-primary py-2">Save settings</button>
+        <button onClick={resetAll} className="btn btn-outline py-2 text-sm" style={{color:"var(--danger)",borderColor:"var(--danger)"}}>Reset all data</button>
+      </div>
+    </div>
+  </Modal>;
+}
+function Onboard({onClose}){
+  return <Modal onClose={onClose}>
+    <div className="p-6 text-center space-y-3">
+      <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center" style={{background:"var(--accent)"}}><Icon name="bike" size={30} color="#fff"/></div>
+      <h3 className="text-xl font-bold">Welcome, Sam 🚵</h3>
+      <p className="text-sm" style={{color:"var(--text2)"}}>This is your single reference for the 13-week build toward the <b style={{color:"var(--text)"}}>RBC GranFondo Whistler</b> on Sept 12, 2026. Open it daily: it tells you exactly what to do, tracks your weeks, and logs your rides.</p>
+      <div className="p-3 rounded-lg text-sm text-left" style={{background:"#0f1117"}}>
+        <div className="flex justify-between"><span style={{color:"var(--text2)"}}>Training starts</span><span className="mono">Mon, Jun 15 2026</span></div>
+        <div className="flex justify-between"><span style={{color:"var(--text2)"}}>Race day</span><span className="mono">Sat, Sep 12 2026</span></div>
+        <div className="flex justify-between"><span style={{color:"var(--text2)"}}>Goal</span><span className="mono">122 km · sub-4:00</span></div>
+      </div>
+      <p className="text-xs" style={{color:"var(--text2)"}}>The plan: 80/20 polarized training. 80% easy (Z1–Z2), 20% hard (Z4–Z5). Avoid the grey zone. Your MTB base is your superpower — we're closing the gaps: sustained output, pacing, fueling, road position.</p>
+      <button onClick={onClose} className="btn btn-primary w-full py-2.5">Let's go →</button>
+    </div>
+  </Modal>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
