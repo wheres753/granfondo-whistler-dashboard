@@ -699,7 +699,11 @@ function WorkoutBody({w,maxHR}){
     </div>}
 
     {w.exercises && <div className="space-y-1.5 mb-3">
-      <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Exercises (in order)</div>
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Exercises (in order)</div>
+        <a href="Gym-Exercise-Guide.pdf" target="_blank" rel="noopener" className="text-xs flex items-center gap-1" style={{color:"#a855f7"}}>
+          <Icon name="download" size={12}/>New to these? Exercise guide</a>
+      </div>
       {w.exercises.map((e,i)=>(
         <div key={i} className="p-2.5 rounded-lg" style={{background:"#0f1117"}}>
           <div className="flex items-center justify-between">
@@ -1200,6 +1204,11 @@ function Gear({gearStatus,setGearStatus}){
           <div className="flex justify-between font-bold pt-1" style={{color:"var(--text)",borderTop:"1px solid var(--border)"}}><span>≈ Total</span><span className="mono">$766 CAD</span></div>
         </div>
       </div>
+      <a href="Gym-Exercise-Guide.pdf" target="_blank" rel="noopener" className="card p-4 block" style={{borderColor:"#a855f7"}}>
+        <h3 className="font-bold mb-1 text-sm flex items-center gap-2" style={{color:"#a855f7"}}><Icon name="dumbbell" size={16} color="#a855f7"/>Gym Exercise Guide (PDF)</h3>
+        <p className="text-xs" style={{color:"var(--text2)"}}>Never lifted before? Plain-English how-to for all 13 exercises in your plan — what each is, step-by-step, form cues, and a demo video search.</p>
+        <div className="btn w-full mt-2 py-2 text-center text-sm flex items-center justify-center gap-2" style={{background:"#a855f7",color:"#fff"}}><Icon name="download" size={15} color="#fff"/>Download the guide</div>
+      </a>
       <div className="card p-4" style={{borderColor:"var(--accent)"}}>
         <h3 className="font-bold mb-1 text-sm">Garmin setup</h3>
         <ol className="text-xs space-y-1 list-decimal pl-4" style={{color:"var(--text2)"}}>
