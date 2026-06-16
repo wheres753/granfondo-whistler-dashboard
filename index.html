@@ -244,7 +244,7 @@ function gymDay(n,session){
   else if(n<=11){ex=GYM_P2;title="Gym — Load Session "+session;dur=55;}
   else {ex=GYM_TAPER;title="Gym — Taper (light)";dur=40;}
   return {type:"gym",title,durationMin:dur,exercises:ex,
-    notes:gymWeightNote[n]+(session===2?" Same structure as Monday — focus on feeling the right muscles working.":" Progression rule: only add weight when you complete all reps with perfect form two sessions in a row.")};
+    notes:gymWeightNote[n]+(session===2?" Same movements as Tuesday — but this is your primary, heavier session of the week. Focus on feeling the right muscles working.":" Progression rule: only add weight when you complete all reps with perfect form two sessions in a row.")};
 }
 function soccerDay(){return {type:"soccer",title:"Soccer",durationMin:90,
   notes:"Play normally — high-intensity cross-training. Pre-soccer: 20–30 min easy spin warm-up at the work gym if time allows."};}
@@ -254,26 +254,47 @@ function mtbDay(n){const m=MTB[n];return {type:"mtb",title:"MTB — Long Ride",d
   notes:m[2],fuelReminder:m[0]>120};}
 function hikeDay(){return {type:"hike",title:"Hike / Active Recovery",durationMin:120,
   notes:"Keep it fun. Not a training session — just movement and enjoyment. Protect this lifestyle; don't overtrain."};}
-function restDay(extra){return {type:"rest",title:"Rest or Easy Walk",durationMin:0,
+function restDay(extra,title){return {type:"rest",title:title||"Rest or Easy Walk",durationMin:0,
   notes:extra||"Optional 30–45 min walk. No training stress today. Recovery is where adaptation happens."};}
+function tueComboDay(n){
+  const gym=gymDay(n,1), soccer=soccerDay();
+  return {
+    type:"combo", title:"Strength + Soccer",
+    durationMin:gym.durationMin+soccer.durationMin,
+    sessions:[
+      {...gym, title:"Gym — Strength (lighter, pre-soccer)",
+        notes:"Your lighter strength touch for the week — the heavier session is Thursday. Lift controlled and leave something in the legs for soccer. "+gymWeightNote[n]},
+      {...soccer, title:"Soccer",
+        notes:"Play normally — high-intensity cross-training. Warm up with 10–15 min easy spin before you lift, then soccer later in the day."}
+    ],
+    notes:"Two sessions today — your gym + soccer day. Order: easy spin warm-up → strength (controlled) → soccer later. If your legs are cooked, prioritise soccer and back off the weights. This is a hard day, so Monday and Friday stay easy."
+  };
+}
+function fridayActive(n){
+  const build = n>=7 && n<=11;
+  return {type:"rest",
+    title: build?"Active Recovery (optional easy ride)":"Active Recovery",
+    durationMin:0,
+    notes: build
+      ? "You're at the other office today — no gym/spin bike. Optional easy 30–45 min Z2 outdoor ride or brisk walk if you have access (this replaces the build-phase second spin; keep it genuinely easy, cadence-focused). Otherwise just rest and walk."
+      : "You're at the other office today — no gym. Rest or an easy 30–45 min walk / Z1 active recovery. No training stress."};
+}
 
 function makeWeek(n){
   if(n===13) return week13();
   const d={};
-  d.monday=gymDay(n,1);
-  d.tuesday=soccerDay();
+  d.monday=restDay("Rest day — you're at the other office (no gym), and this is your full recovery day. An easy walk is fine, but nothing structured. Adaptation happens when you rest.","Rest Day");
+  d.tuesday=(n===12)?soccerDay():tueComboDay(n);   // week 12 taper: soccer only, single light lift Thursday
   d.wednesday=spinDay(n);
-  d.thursday=(n===12)?restDay("Active recovery only — no gym Thursday during taper. Short walk if you like."):gymDay(n,2);
-  d.friday=(n>=7&&n<=11)?fridaySpin():restDay();
+  d.thursday=gymDay(n,2);                            // main strength (week 12 -> taper light session)
+  d.friday=fridayActive(n);
   d.saturday=mtbDay(n);
   d.sunday=hikeDay();
   return d;
 }
 function week13(){
   return {
-    monday:{type:"spin",title:"Easy Spin — Wake the Legs",durationMin:30,
-      structure:[{zone:"z2",durationMin:30,instruction:"Easy effort, high cadence 90+ RPM. Just wake the legs up. Nothing hard."}],
-      notes:"30 min easy, high cadence. You're sharp — keep it light."},
+    monday:restDay("Race week, and you're at the other office — complete rest. Sleep well, eat carbs. Your legs activate plenty in Wednesday's openers.","Rest Day"),
     tuesday:{type:"soccer",title:"Soccer (light, optional)",durationMin:60,
       notes:"Only if you feel good — light effort, don't go hard. Skip it if the legs feel heavy."},
     wednesday:{type:"spin",title:"Openers — Easy + 3×5 Z3",durationMin:39,
@@ -300,9 +321,9 @@ for(let i=1;i<=13;i++) workoutLibrary[i]=makeWeek(i);
 
 const DAY_NAMES=["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 const DAY_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-const TYPE_COLORS={spin:"#3b82f6",mtb:"#22c55e",gym:"#a855f7",soccer:"#f59e0b",hike:"#84cc16",rest:"#374151",race:"#ef4444",run:"#06b6d4"};
-const TYPE_EMOJI={spin:"🔵",mtb:"🟢",gym:"🔴",soccer:"⚽",hike:"🏔️",rest:"⬜",race:"🏁",run:"🏃"};
-const TYPE_LABEL={spin:"Spin",mtb:"MTB",gym:"Gym",soccer:"Soccer",hike:"Hike",rest:"Rest",race:"Race",run:"Run"};
+const TYPE_COLORS={spin:"#3b82f6",mtb:"#22c55e",gym:"#a855f7",soccer:"#f59e0b",hike:"#84cc16",rest:"#374151",race:"#ef4444",run:"#06b6d4",combo:"#f59e0b"};
+const TYPE_EMOJI={spin:"🔵",mtb:"🟢",gym:"🔴",soccer:"⚽",hike:"🏔️",rest:"⬜",race:"🏁",run:"🏃",combo:"🔴⚽"};
+const TYPE_LABEL={spin:"Spin",mtb:"MTB",gym:"Gym",soccer:"Soccer",hike:"Hike",rest:"Rest",race:"Race",run:"Run",combo:"Gym + Soccer"};
 const LOG_TYPES=["Spin Bike","MTB","Run","Gym","Soccer","Hike","Other"];
 const LOGTYPE_TO_KEY={"Spin Bike":"spin","MTB":"mtb","Run":"run","Gym":"gym","Soccer":"soccer","Hike":"hike","Other":"rest"};
 const KEY_TO_LOGTYPE={spin:"Spin Bike",mtb:"MTB",run:"Run",gym:"Gym",soccer:"Soccer",hike:"Hike",rest:"Other",race:"MTB"};
@@ -427,21 +448,26 @@ function App(){
   function markComplete(wk,dayIdx){
     const key=wk+"-"+DAY_NAMES[dayIdx];
     const w=workoutLibrary[wk][DAY_NAMES[dayIdx]];
+    const wasDone=completed[key];
     setCompleted(prev=>({...prev,[key]:!prev[key]}));
-    if(!completed[key] && w.type!=="rest" && w.durationMin>0){
-      // derive a rough zone distribution
-      let zd=null;
-      if(w.structure){
-        const tot=w.structure.reduce((s,x)=>s+x.durationMin,0);
-        zd={z1:0,z2:0,z3:0,z4:0,z5:0};
-        w.structure.forEach(x=>zd[x.zone]+=100*x.durationMin/tot);
-        Object.keys(zd).forEach(k=>zd[k]=Math.round(zd[k]));
-      } else if(w.type==="mtb"){
-        zd= wk>=7&&wk<=11 ? {z1:5,z2:72,z3:13,z4:10,z5:0} : {z1:10,z2:83,z3:5,z4:2,z5:0};
-      }
-      addActivity({date:dayDate(wk,dayIdx),type:KEY_TO_LOGTYPE[w.type],durationMinutes:w.durationMin,
-        distanceKm:null,elevationM:null,avgHR:null,maxHR:null,perceivedEffort:5,
-        zoneDistribution:zd,fromStrava:false,notes:"Marked complete from plan.",completedPlanWorkout:"Week "+wk+" "+DAY_SHORT[dayIdx]+" "+TYPE_LABEL[w.type]});
+    if(!wasDone && w.type!=="rest" && w.durationMin>0){
+      const sessions=w.sessions||[w]; // combo days log one activity per session
+      sessions.forEach(s=>{
+        if(!s.durationMin) return;
+        let zd=null;
+        if(s.structure){
+          const tot=s.structure.reduce((a,x)=>a+x.durationMin,0);
+          zd={z1:0,z2:0,z3:0,z4:0,z5:0};
+          s.structure.forEach(x=>zd[x.zone]+=100*x.durationMin/tot);
+          Object.keys(zd).forEach(k=>zd[k]=Math.round(zd[k]));
+        } else if(s.type==="mtb"){
+          zd= wk>=7&&wk<=11 ? {z1:5,z2:72,z3:13,z4:10,z5:0} : {z1:10,z2:83,z3:5,z4:2,z5:0};
+        }
+        addActivity({date:dayDate(wk,dayIdx),type:KEY_TO_LOGTYPE[s.type]||"Other",durationMinutes:s.durationMin,
+          distanceKm:null,elevationM:null,avgHR:null,maxHR:null,perceivedEffort:5,
+          zoneDistribution:zd,fromStrava:false,notes:"Marked complete from plan.",
+          completedPlanWorkout:"Week "+wk+" "+DAY_SHORT[dayIdx]+" "+(TYPE_LABEL[s.type]||s.type)});
+      });
     }
   }
 
@@ -615,7 +641,7 @@ function Plan({week,completed,setDayModal}){
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="text-xl font-bold">13-Week Plan</h2>
       <div className="flex flex-wrap gap-3 text-xs" style={{color:"var(--text2)"}}>
-        {Object.keys(TYPE_EMOJI).filter(t=>t!=="run").map(t=>
+        {Object.keys(TYPE_EMOJI).filter(t=>!["run","combo","race"].includes(t)).map(t=>
           <span key={t} className="flex items-center gap-1">{TYPE_EMOJI[t]} {TYPE_LABEL[t]}</span>)}
       </div>
     </div>
@@ -659,11 +685,46 @@ function Plan({week,completed,setDayModal}){
   </div>;
 }
 
+function WorkoutBody({w,maxHR}){
+  let acc=0;
+  return <>
+    {w.structure && <div className="space-y-1.5 mb-3">
+      <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Minute-by-minute</div>
+      {w.structure.map((s,i)=>{const start=acc;acc+=s.durationMin;return(
+        <div key={i} className="flex items-start gap-3 p-2 rounded-lg" style={{background:"#0f1117"}}>
+          <div className="mono text-xs pt-0.5 w-16 shrink-0" style={{color:"var(--text2)"}}>{start}–{acc}m</div>
+          <ZoneBadge zone={s.zone} maxHR={maxHR}/>
+          <div className="text-sm flex-1">{s.instruction}</div>
+        </div>);})}
+    </div>}
+
+    {w.exercises && <div className="space-y-1.5 mb-3">
+      <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Exercises (in order)</div>
+      {w.exercises.map((e,i)=>(
+        <div key={i} className="p-2.5 rounded-lg" style={{background:"#0f1117"}}>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold flex items-center gap-2"><Icon name="dumbbell" size={15} color="#a855f7"/>{e.name}</span>
+            <span className="mono text-sm" style={{color:"var(--text2)"}}>{e.sets} × {e.reps}</span>
+          </div>
+          <div className="text-xs mt-0.5" style={{color:"var(--text2)"}}>{e.notes}</div>
+        </div>))}
+    </div>}
+
+    {w.type==="mtb" && <div className="mb-3 p-3 rounded-lg text-sm" style={{background:"#22c55e14"}}>
+      <span className="font-semibold" style={{color:"var(--success)"}}>Terrain & HR:</span> Hold {w.targetHR}. On climbs, spin an easier gear — don't let HR spike into Z3 on easy days.
+      {w.fuelReminder && <div className="mt-1 flex items-center gap-1"><Icon name="flame" size={14} color="var(--warning)"/> Fuel every 30–45 min — ~30 g carbs. Train the gut.</div>}
+    </div>}
+
+    {w.notes && <div className="p-3 rounded-lg text-sm" style={{background:"#1a1d27",border:"1px solid var(--border)"}}>
+      <span style={{color:"var(--text2)",whiteSpace:"pre-line"}}>{w.notes}</span></div>}
+  </>;
+}
+
 function WorkoutModal({week,dayIdx,completed,onClose,onComplete,maxHR}){
   const w=workoutLibrary[week][DAY_NAMES[dayIdx]];
   const key=week+"-"+DAY_NAMES[dayIdx];
   const done=completed[key];
-  let acc=0;
+  const sessions=w.sessions;
   return <Modal onClose={onClose} wide>
     <div className="p-5">
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -675,38 +736,21 @@ function WorkoutModal({week,dayIdx,completed,onClose,onComplete,maxHR}){
         <button onClick={onClose} className="btn btn-outline p-1.5"><Icon name="x" size={18}/></button>
       </div>
 
-      {w.structure && <div className="space-y-1.5 mb-3">
-        <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Minute-by-minute</div>
-        {w.structure.map((s,i)=>{const start=acc;acc+=s.durationMin;return(
-          <div key={i} className="flex items-start gap-3 p-2 rounded-lg" style={{background:"#0f1117"}}>
-            <div className="mono text-xs pt-0.5 w-16 shrink-0" style={{color:"var(--text2)"}}>{start}–{acc}m</div>
-            <ZoneBadge zone={s.zone} maxHR={maxHR}/>
-            <div className="text-sm flex-1">{s.instruction}</div>
-          </div>);})}
-      </div>}
-
-      {w.exercises && <div className="space-y-1.5 mb-3">
-        <div className="text-xs font-semibold uppercase" style={{color:"var(--text2)"}}>Exercises (in order)</div>
-        {w.exercises.map((e,i)=>(
-          <div key={i} className="p-2.5 rounded-lg" style={{background:"#0f1117"}}>
-            <div className="flex items-center justify-between">
-              <span className="font-semibold flex items-center gap-2"><Icon name="dumbbell" size={15} color="#a855f7"/>{e.name}</span>
-              <span className="mono text-sm" style={{color:"var(--text2)"}}>{e.sets} × {e.reps}</span>
+      {sessions ? <>
+        {w.notes && <div className="p-3 mb-3 rounded-lg text-sm" style={{background:"#f59e0b14",border:"1px solid #f59e0b44"}}>
+          <span style={{color:"var(--text)",whiteSpace:"pre-line"}}>{w.notes}</span></div>}
+        {sessions.map((s,i)=>(
+          <div key={i} className="mb-4">
+            <div className="flex items-center justify-between mb-2 pb-1" style={{borderBottom:"1px solid var(--border)"}}>
+              <span className="font-bold flex items-center gap-2">{TYPE_EMOJI[s.type]} {s.title}</span>
+              {s.durationMin>0 && <span className="mono text-xs" style={{color:"var(--text2)"}}>{fmtHrs(s.durationMin)}</span>}
             </div>
-            <div className="text-xs mt-0.5" style={{color:"var(--text2)"}}>{e.notes}</div>
+            <WorkoutBody w={s} maxHR={maxHR}/>
           </div>))}
-      </div>}
-
-      {w.type==="mtb" && <div className="mb-3 p-3 rounded-lg text-sm" style={{background:"#22c55e14"}}>
-        <span className="font-semibold" style={{color:"var(--success)"}}>Terrain & HR:</span> Hold {w.targetHR}. On climbs, spin an easier gear — don't let HR spike into Z3 on easy days.
-        {w.fuelReminder && <div className="mt-1 flex items-center gap-1"><Icon name="flame" size={14} color="var(--warning)"/> Fuel every 30–45 min — ~30 g carbs. Train the gut.</div>}
-      </div>}
-
-      {w.notes && <div className="p-3 rounded-lg text-sm" style={{background:"#1a1d27",border:"1px solid var(--border)"}}>
-        <span style={{color:"var(--text2)"}}>{w.notes}</span></div>}
+      </> : <WorkoutBody w={w} maxHR={maxHR}/>}
 
       {w.type!=="rest" && w.type!=="race" &&
-        <button onClick={onComplete} className={"btn w-full mt-4 py-2.5 flex items-center justify-center gap-2 "+(done?"btn-outline":"btn-primary")}>
+        <button onClick={onComplete} className={"btn w-full mt-2 py-2.5 flex items-center justify-center gap-2 "+(done?"btn-outline":"btn-primary")}>
           <Icon name="check" size={18}/>{done?"Completed — tap to undo":"Mark as Complete"}
         </button>}
       {w.type==="race" && <div className="btn btn-primary w-full mt-4 py-2.5 text-center" style={{background:"var(--danger)"}}>See the Race Day tab for the full briefing 🏁</div>}
